@@ -132,6 +132,21 @@ async def add_upload(
         return cur.lastrowid
 
 
+async def clear_uploads(delete_files: bool = False):
+    async with aiosqlite.connect(DB_PATH) as db:
+        if delete_files:
+            async with db.execute("SELECT pdf_path FROM uploads WHERE pdf_path IS NOT NULL") as cur:
+                rows = await cur.fetchall()
+            for (path,) in rows:
+                try:
+                    if path and os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+        await db.execute("DELETE FROM uploads")
+        await db.commit()
+
+
 async def get_uploads(limit=20) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

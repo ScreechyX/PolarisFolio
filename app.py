@@ -34,7 +34,7 @@ import msal
 from database import (
     init_db, get_setting, set_setting, get_all_settings,
     get_ical_feeds, add_ical_feed, toggle_ical_feed, delete_ical_feed,
-    add_upload, get_uploads,
+    add_upload, get_uploads, clear_uploads,
 )
 from scheduler import scheduler, apply_schedule
 
@@ -410,6 +410,12 @@ async def history_page(request: Request, generating: str = None):
         "generating": generating == "1",
         "active": "history",
     })
+
+
+@app.post("/history/clear")
+async def clear_history(delete_files: str = Form("off")):
+    await clear_uploads(delete_files=delete_files == "on")
+    return RedirectResponse("/history?success=cleared", status_code=303)
 
 
 @app.get("/download/{upload_id}")
