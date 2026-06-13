@@ -120,6 +120,10 @@
     .nav-item.active { background: var(--accent); color: #fff; }
 
     .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+    .nav-label { transition: opacity 0.15s; }
+
+    .sidebar.collapsed .nav-item { justify-content: center; padding: 9px; }
+    .sidebar.collapsed .nav-label { opacity: 0; width: 0; overflow: hidden; }
 
     .sidebar-footer {
       padding: 14px;
@@ -411,7 +415,7 @@
         <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
         <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
       </svg>
-      Dashboard
+      <span class="nav-label">Dashboard</span>
     </a>
     <a href="/calendars" class="nav-item {% if active == 'calendars' %}active{% endif %}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -419,28 +423,28 @@
         <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
         <line x1="3" y1="10" x2="21" y2="10"/>
       </svg>
-      Calendars
+      <span class="nav-label">Calendars</span>
     </a>
     <a href="/generate" class="nav-item {% if active == 'generate' %}active{% endif %}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 2L2 7l10 5 10-5-10-5z"/>
         <path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
       </svg>
-      Generate
+      <span class="nav-label">Generate</span>
     </a>
     <a href="/history" class="nav-item {% if active == 'history' %}active{% endif %}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10"/>
         <polyline points="12 6 12 12 16 14"/>
       </svg>
-      History
+      <span class="nav-label">History</span>
     </a>
     <a href="/settings" class="nav-item {% if active == 'settings' %}active{% endif %}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
       </svg>
-      Settings
+      <span class="nav-label">Settings</span>
     </a>
   </div>
 
