@@ -185,12 +185,12 @@
           </div>
           <label class="toggle">
             <input type="checkbox" name="upload_to_rm" value="on" id="uploadToggle"
-              {% if not ms_connected and feeds | length == 0 %}disabled{% endif %}>
+              {% if not ms_connected and feeds | length == 0 %}disabled{% else %}checked{% endif %}>
             <span class="toggle-slider"></span>
           </label>
         </div>
 
-        <div class="option-row" id="folderRow" style="display: none;">
+        <div class="option-row" id="folderRow" style="display: flex;">
           <div class="option-label">
             <div class="option-name">reMarkable folder</div>
           </div>
