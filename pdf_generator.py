@@ -455,11 +455,12 @@ _DOW = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
 
 def draw_month_page(c: canvas.Canvas, year: int, month: int,
                     events: list,
-                    day_week_map: dict):
+                    day_week_map: dict,
+                    tz=timezone.utc):
     """
     Full-page monthly calendar grid.
 
-    Columns: week-num gutter + MON … FRI + │ SAT + SUN
+    Columns: week-num gutter + SUN … SAT
     Each cell: day number (circle if today) + up to 2 event pill bars
     """
     draw_tab(c, month)
@@ -476,10 +477,10 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
     month_bm = f"month_{year}_{month:02d}"
     draw_nav_buttons(c, "month", month_bm=month_bm, week_bm=week_bm)
 
-    # Group events by day number
+    # Group events by local day number
     ev_by_day: dict[int, list] = {}
     for e in events:
-        loc = e.start.astimezone(ZoneInfo("UTC"))
+        loc = e.start.astimezone(tz)
         if loc.year == year and loc.month == month:
             ev_by_day.setdefault(loc.day, []).append(e)
 
@@ -1141,7 +1142,7 @@ def build_planner(
         c.bookmarkPage(month_bm)
         c.addOutlineEntry(
             datetime(year, month, 1).strftime("%B %Y"), month_bm, level=0)
-        draw_month_page(c, year, month, ev_by_month[(year, month)], day_week_map)
+        draw_month_page(c, year, month, ev_by_month[(year, month)], day_week_map, tz=tz)
         c.showPage()
 
         # Weeks that belong to this month, in chronological order
