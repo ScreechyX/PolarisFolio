@@ -185,9 +185,40 @@
       </div>
     </div>
 
-    <button type="submit" class="btn btn-primary">Save settings</button>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <button type="submit" class="btn btn-primary">Save settings</button>
+      <button type="button" class="btn btn-secondary" id="runNowBtn" onclick="runScheduleNow()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        Run now
+      </button>
+      <span id="runNowStatus" style="font-size: 12.5px; color: var(--ink-3); font-family: var(--mono);"></span>
+    </div>
 
   </form>
+
+<script>
+  async function runScheduleNow() {
+    const btn = document.getElementById('runNowBtn');
+    const status = document.getElementById('runNowStatus');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Starting...';
+    status.textContent = '';
+    try {
+      const res = await fetch('/api/schedule/run-now', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'started') {
+        btn.innerHTML = '✓ Started';
+        status.textContent = 'Running in background — check History for the result.';
+      }
+    } catch {
+      btn.innerHTML = 'Run now';
+      btn.disabled = false;
+      status.textContent = 'Error — check server logs.';
+    }
+  }
+</script>
 
 </div>
 {% endblock %}

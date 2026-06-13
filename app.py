@@ -524,6 +524,17 @@ async def save_settings(
 
 
 # ---------------------------------------------------------------------------
+# API - trigger scheduled generation immediately
+# ---------------------------------------------------------------------------
+
+@app.post("/api/schedule/run-now")
+async def schedule_run_now(background_tasks: BackgroundTasks):
+    from scheduler import _scheduled_generate
+    background_tasks.add_task(_scheduled_generate)
+    return {"status": "started"}
+
+
+# ---------------------------------------------------------------------------
 # API - event preview (for generate page)
 # ---------------------------------------------------------------------------
 
