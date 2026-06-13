@@ -153,6 +153,99 @@ def circle(c: canvas.Canvas, cx, cy, r, fill, stroke=None, lw=0.5):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Navigation buttons (top-right of every page header)
+# ─────────────────────────────────────────────────────────────────────────────
+
+YEAR_BM = "year_overview"   # bookmark for the year overview page
+
+C_WHITE = colors.white      # convenience alias used in nav icon drawing
+
+
+def _draw_nav_icon(c: canvas.Canvas, cx: float, cy: float,
+                   sz: float, name: str, col):
+    """Draw one nav icon centred at (cx, cy) within a sz×sz logical box."""
+    if name == "year":
+        # 3×3 grid of tiny squares
+        dot = sz * 0.13
+        step = sz * 0.33
+        for row in range(3):
+            for ci in range(3):
+                dx = cx + (ci - 1) * step
+                dy = cy + (row - 1) * step
+                c.setFillColor(col)
+                c.rect(dx - dot / 2, dy - dot / 2, dot, dot, fill=1, stroke=0)
+
+    elif name in ("month", "day"):
+        w = sz * 0.64; h = sz * 0.58; hdr_h = h * 0.3
+        x = cx - w / 2; y = cy - h / 2
+        c.setStrokeColor(col); c.setFillColor(C_WHITE); c.setLineWidth(0.5)
+        c.rect(x, y, w, h, fill=1, stroke=1)
+        c.setFillColor(col)
+        c.rect(x, y + h - hdr_h, w, hdr_h, fill=1, stroke=0)
+        if name == "day":
+            sq = sz * 0.15
+            c.rect(cx - sq / 2, cy - h * 0.1, sq, sq, fill=1, stroke=0)
+
+    elif name == "week":
+        w = sz * 0.64; h = sz * 0.58; hdr_h = h * 0.3
+        x = cx - w / 2; y = cy - h / 2
+        c.setStrokeColor(col); c.setFillColor(C_WHITE); c.setLineWidth(0.5)
+        c.rect(x, y, w, h, fill=1, stroke=1)
+        c.setFillColor(col)
+        c.rect(x, y + h - hdr_h, w, hdr_h, fill=1, stroke=0)
+        c.setStrokeColor(col); c.setLineWidth(0.3)
+        body_top = y + h - hdr_h
+        for i in range(1, 5):
+            lx = x + w * i / 5
+            c.line(lx, y, lx, body_top)
+
+    elif name == "menu":
+        lw = sz * 0.56
+        c.setStrokeColor(col); c.setLineWidth(0.75)
+        for row in range(3):
+            ly = cy + (row - 1) * sz * 0.29
+            c.line(cx - lw / 2, ly, cx + lw / 2, ly)
+
+
+def draw_nav_buttons(c: canvas.Canvas, active: str,
+                     month_bm: str = "", week_bm: str = ""):
+    """
+    Draw 5 nav icons in the top-right of the page header.
+    active: "year" | "month" | "week"
+    Icons (left→right): year-grid, month-cal, week-cal, day-cal, menu
+    Active icon uses C_ACCENT; others use C_SILVER.
+    Tappable icons link to their bookmark; no-bookmark icons are display-only.
+    """
+    SZ    = 5.2 * mm
+    GAP   = 2.0 * mm
+    right = MARGIN + CONTENT_W
+    top   = PAGE_H - MARGIN
+    cy    = top - 13   # vertically centred in the ~26pt header band
+
+    icons = [
+        ("year",  YEAR_BM),
+        ("month", month_bm),
+        ("week",  week_bm),
+        ("day",   ""),      # no daily pages — always grey, no link
+        ("menu",  ""),
+    ]
+
+    total_w = len(icons) * SZ + (len(icons) - 1) * GAP
+    start_x = right - total_w
+
+    for i, (name, bm) in enumerate(icons):
+        cx = start_x + i * (SZ + GAP) + SZ / 2
+        col = (colors.HexColor(C_ACCENT)
+               if name == active
+               else colors.HexColor(C_SILVER))
+        _draw_nav_icon(c, cx, cy, SZ, name, col)
+        if bm:
+            lx = cx - SZ / 2
+            ly = cy - SZ / 2
+            c.linkAbsolute("", bm, (lx, ly, lx + SZ, ly + SZ))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Right-edge month tab
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -232,6 +325,129 @@ def draw_page_header(c: canvas.Canvas,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Year overview page
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MINI_DOW = ["M", "T", "W", "T", "F", "S", "S"]
+
+def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict):
+    """
+    Full-year calendar: 3-col × 4-row mini-month grid.
+    All 12 month tabs are shown as equal-height segments on the right edge.
+    Each tab segment links to that month's overview page.
+    Each date cell links to its weekly spread.
+    Today is circled; the current month name gets a colour pill badge.
+    """
+    today = date.today()
+
+    # ── All-12-months right-edge tabs ─────────────────────────────────────────
+    tab_x   = PAGE_W - TAB_W
+    seg_h   = PAGE_H / 12
+    for m in range(1, 13):
+        fill_col = colors.HexColor(MONTH_TAB_COLORS[(m - 1) % 12])
+        y0 = PAGE_H - m * seg_h
+        filled_rect(c, tab_x, y0, TAB_W, seg_h, fill=fill_col)
+        # Each tab segment links to that month
+        mbm = f"month_{year}_{m:02d}"
+        c.linkAbsolute("", mbm, (tab_x, y0, PAGE_W, y0 + seg_h))
+    vrule(c, tab_x, 0, PAGE_H, col=colors.HexColor("#00000018"), lw=0.5)
+
+    # ── Page header ───────────────────────────────────────────────────────────
+    top = PAGE_H - MARGIN
+    # "2026" bold + "CALENDAR" light
+    c.setFont("Helvetica-Bold", 15)
+    c.setFillColor(C_INK)
+    year_str = str(year)
+    c.drawString(MARGIN + 6, top - 11, year_str)
+    year_w = c.stringWidth(year_str, "Helvetica-Bold", 15)
+    txt(c, MARGIN + 6 + year_w + 4, top - 11, "CALENDAR",
+        size=15, bold=False, col=colors.HexColor(C_INK_2))
+
+    sep_y = top - 26
+    hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
+
+    draw_nav_buttons(c, "year")
+
+    # ── Mini-month grid ───────────────────────────────────────────────────────
+    COL_GAP  = 5 * mm
+    ROW_GAP  = 4 * mm
+    avail_w  = CONTENT_W
+    avail_h  = sep_y - MARGIN
+    cell_w   = (avail_w - 2 * COL_GAP) / 3
+    cell_h   = (avail_h - 3 * ROW_GAP) / 4
+
+    for m in range(1, 13):
+        row  = (m - 1) // 3
+        col  = (m - 1) % 3
+        cx0  = MARGIN + col * (cell_w + COL_GAP)
+        # top-y of this cell
+        cell_top = sep_y - ROW_GAP - row * (cell_h + ROW_GAP)
+
+        is_cur = (m == today.month and year == today.year)
+        tab_col = MONTH_TAB_COLORS[(m - 1) % 12]
+
+        # Month name
+        mname  = datetime(year, m, 1).strftime("%B").upper()
+        name_y = cell_top - 5.5 * mm
+
+        if is_cur:
+            pw = c.stringWidth(mname, "Helvetica-Bold", 7) + 4 * mm
+            pill_x = cx0 + cell_w / 2 - pw / 2
+            filled_rect(c, pill_x, name_y - 1.5 * mm, pw, 5.5 * mm,
+                        fill=colors.HexColor(tab_col), r=2)
+            txt(c, cx0 + cell_w / 2, name_y, mname,
+                size=7, bold=True, col=C_WHITE, align="center")
+        else:
+            txt(c, cx0 + cell_w / 2, name_y, mname,
+                size=7, bold=True, col=C_INK, align="center")
+
+        # DOW row
+        dow_y   = name_y - 5.5 * mm
+        cell_sz = cell_w / 7
+        for di, d in enumerate(_MINI_DOW):
+            dx = cx0 + di * cell_sz + cell_sz / 2
+            col_d = C_GREY if di >= 5 else C_INK_2
+            txt(c, dx, dow_y, d, size=4.5, col=col_d, align="center")
+
+        # Thin rule under DOW
+        hrule(c, cx0, dow_y - 1 * mm, cell_w, col=C_GHOST, lw=0.3)
+
+        # Date cells
+        first   = date(year, m, 1)
+        dow0    = first.weekday()   # 0=Mon
+        _, n_days = calendar.monthrange(year, m)
+        date_y0 = dow_y - 5 * mm   # y of the first date row
+
+        for day_num in range(1, n_days + 1):
+            slot      = dow0 + day_num - 1
+            grid_row  = slot // 7
+            grid_col  = slot % 7
+            dx = cx0 + grid_col * cell_sz + cell_sz / 2
+            dy = date_y0 - grid_row * 4.2 * mm
+
+            is_td   = (day_num == today.day and m == today.month
+                       and year == today.year)
+            is_wknd = (grid_col >= 5)
+
+            if is_td:
+                circle(c, dx, dy + 1.5 * mm, 2.8 * mm,
+                       fill=colors.HexColor(C_INK))
+                txt(c, dx, dy, str(day_num), size=5, bold=True,
+                    col=C_WHITE, align="center")
+            else:
+                num_col = C_GREY if is_wknd else C_INK_2
+                txt(c, dx, dy, str(day_num), size=5,
+                    col=num_col, align="center")
+
+            # Tap → week page
+            day_key = date(year, m, day_num).strftime("%Y-%m-%d")
+            if day_key in day_week_map:
+                c.linkAbsolute("", day_week_map[day_key],
+                               (dx - cell_sz / 2, dy - 0.8 * mm,
+                                dx + cell_sz / 2, dy + 3.8 * mm))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Monthly overview page
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -248,13 +464,17 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
     """
     draw_tab(c, month)
     month_name = datetime(year, month, 1).strftime("%B").upper()
-    week_label = "MONTHLY OVERVIEW"
     sep_y = draw_page_header(
         c,
         left_label=f"{month_name} {year}",
-        left_sub=week_label,
+        left_sub="MONTHLY OVERVIEW",
         accent_bar=True,
     )
+    # First week of this month as the "week" nav target
+    first_day_key = date(year, month, 1).strftime("%Y-%m-%d")
+    week_bm = day_week_map.get(first_day_key, "")
+    month_bm = f"month_{year}_{month:02d}"
+    draw_nav_buttons(c, "month", month_bm=month_bm, week_bm=week_bm)
 
     # Group events by day number
     ev_by_day: dict[int, list] = {}
@@ -418,10 +638,12 @@ def draw_week_page(c: canvas.Canvas,
         c,
         left_label=label,
         left_sub=date_range,
-        right_label="WEEKLY PLAN",
-        right_sub=str(week_num),
         accent_bar=True,
     )
+    week_bm = f"week_{week_monday.isoformat()}"
+    draw_nav_buttons(c, "week",
+                     month_bm=month_bookmark,
+                     week_bm=week_bm)
 
     # ── Grid geometry ────────────────────────────────────────────────────────
     TIME_COL_W = 9 * mm
@@ -902,6 +1124,13 @@ def build_planner(
     c = canvas.Canvas(output_path, pagesize=A4)
     c.setTitle(title)
     c.setAuthor("PolarisFolio")
+
+    # Year overview (first page)
+    year_val = start_date.year
+    c.bookmarkPage(YEAR_BM)
+    c.addOutlineEntry(str(year_val), YEAR_BM, level=0)
+    draw_year_page(c, year_val, day_week_map)
+    c.showPage()
 
     # Monthly overviews
     for year, month in months:
