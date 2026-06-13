@@ -40,55 +40,35 @@
     margin-top: 4px;
   }
 
-  .next-event-banner {
-    background: var(--ink);
-    color: #fff;
-    border-radius: 8px;
-    padding: 20px 24px;
-    margin-bottom: 24px;
+  /* Two-column dashboard body */
+  .dash-body {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* Day group inside the events card */
+  .day-group { padding: 16px 0 4px; }
+  .day-group:first-child { padding-top: 4px; }
+  .day-group + .day-group { border-top: 1px solid var(--rule); }
+
+  .day-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
   }
 
-  .next-event-label {
-    font-size: 11px;
+  .day-label {
+    font-size: 13px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #888;
-    margin-bottom: 5px;
-    font-family: var(--mono);
+    color: var(--ink);
   }
 
-  .next-event-title {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.3px;
-  }
-
-  .next-event-meta {
-    font-size: 12.5px;
-    color: #aaa;
-    margin-top: 4px;
-    font-family: var(--mono);
-  }
-
-  .next-event-countdown {
-    text-align: right;
-  }
-
-  .countdown-value {
-    font-size: 32px;
-    font-weight: 600;
-    font-family: var(--mono);
-    color: var(--accent);
-    letter-spacing: -1px;
-  }
-
-  .countdown-label {
-    font-size: 11px;
-    color: #666;
+  .day-date {
+    font-size: 12px;
+    color: var(--ink-3);
     font-family: var(--mono);
   }
 
@@ -98,11 +78,18 @@
     display: flex;
     align-items: flex-start;
     gap: 14px;
-    padding: 12px 0;
+    padding: 8px 0;
     border-bottom: 1px solid var(--rule);
   }
 
   .event-item:last-child { border-bottom: none; }
+
+  .event-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
 
   .event-time {
     font-family: var(--mono);
@@ -126,11 +113,43 @@
     font-family: var(--mono);
   }
 
-  .quick-actions {
+  .next-event-banner {
+    background: var(--ink);
+    color: #fff;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
     display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
+
+  .next-event-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #888;
+    margin-bottom: 3px;
+    font-family: var(--mono);
+  }
+
+  .next-event-title { font-size: 15px; font-weight: 600; }
+  .next-event-meta  { font-size: 12px; color: #aaa; margin-top: 3px; font-family: var(--mono); }
+
+  .countdown-value {
+    font-size: 26px;
+    font-weight: 600;
+    font-family: var(--mono);
+    color: var(--accent);
+    letter-spacing: -1px;
+    text-align: right;
+  }
+
+  .countdown-label { font-size: 10px; color: #666; font-family: var(--mono); text-align: right; }
+
+  .quick-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 </style>
 {% endblock %}
 
@@ -142,20 +161,7 @@
 
 <div class="page-body">
 
-  {% if upcoming %}
-  <div class="next-event-banner">
-    <div>
-      <div class="next-event-label">Next up</div>
-      <div class="next-event-title">{{ upcoming[0].title }}</div>
-      <div class="next-event-meta">{{ upcoming[0].time_str }}{% if upcoming[0].location %} &middot; {{ upcoming[0].location }}{% endif %}</div>
-    </div>
-    <div class="next-event-countdown">
-      <div class="countdown-value" id="countdown">--</div>
-      <div class="countdown-label">mins away</div>
-    </div>
-  </div>
-  {% endif %}
-
+  <!-- Stat strip -->
   <div class="stat-grid">
     <div class="stat-card">
       <div class="stat-label">Calendar Sources</div>
@@ -167,13 +173,11 @@
         {% if not ms_connected and not feed_count %}None connected{% endif %}
       </div>
     </div>
-
     <div class="stat-card">
-      <div class="stat-label">Today's Events</div>
+      <div class="stat-label">Events (3 days)</div>
       <div class="stat-value">{{ upcoming | length }}</div>
-      <div class="stat-sub">next 24 hours</div>
+      <div class="stat-sub">today through {{ upcoming_by_day[2][0] if upcoming_by_day|length >= 3 else 'next 3 days' }}</div>
     </div>
-
     <div class="stat-card">
       <div class="stat-label">Planners Generated</div>
       <div class="stat-value">{{ uploads | length }}</div>
@@ -183,67 +187,90 @@
     </div>
   </div>
 
-  <div class="grid-2" style="gap: 20px; align-items: start;">
-
-    <!-- Left col: upcoming + quick actions -->
+  <!-- Next-up banner -->
+  {% if upcoming %}
+  <div class="next-event-banner">
     <div>
-      {% if upcoming %}
-      <div class="card">
-        <div class="card-title">Today</div>
-        <ul class="event-list">
-          {% for event in upcoming %}
-          <li class="event-item">
-            <div class="event-time">{{ event.time_str.split(' - ')[0] }}</div>
-            <div>
-              <div class="event-title">{{ event.title }}</div>
-              <div class="event-meta">
-                {{ event.duration_str }}
-                {% if event.location %} &middot; {{ event.location }}{% endif %}
-                {% if event.attendees %} &middot; {{ event.attendees | length }} people{% endif %}
-              </div>
-            </div>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% else %}
-      <div class="card">
-        <div class="card-title">Today</div>
-        {% if not ms_connected and feed_count == 0 %}
+      <div class="next-event-label">Next up</div>
+      <div class="next-event-title">{{ upcoming[0].title }}</div>
+      <div class="next-event-meta">{{ upcoming[0].time_str }}{% if upcoming[0].location %} &middot; {{ upcoming[0].location }}{% endif %}</div>
+    </div>
+    <div>
+      <div class="countdown-value" id="countdown">--</div>
+      <div class="countdown-label">mins away</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="dash-body">
+
+    <!-- Left: 3-day event list -->
+    <div class="card">
+      <div class="card-title">Upcoming</div>
+
+      {% set any_events = upcoming_by_day | selectattr('2') | list %}
+      {% if not ms_connected and feed_count == 0 %}
         <div class="empty">
           <div class="empty-icon">📅</div>
           <div class="empty-title">No calendars connected</div>
           <div class="empty-body">Connect Microsoft 365 or add an ICS feed to see your events here.</div>
         </div>
-        {% else %}
+      {% elif not upcoming %}
         <div class="empty">
           <div class="empty-icon">✓</div>
-          <div class="empty-title">Nothing in the next 24 hours</div>
+          <div class="empty-title">Nothing in the next 3 days</div>
           <div class="empty-body">Clear schedule ahead.</div>
         </div>
-        {% endif %}
-      </div>
+      {% else %}
+        {% for label, date_str, evts in upcoming_by_day %}
+        <div class="day-group">
+          <div class="day-header">
+            <span class="day-label">{{ label }}</span>
+            <span class="day-date">{{ date_str }}</span>
+          </div>
+          {% if evts %}
+          <ul class="event-list">
+            {% for event in evts %}
+            <li class="event-item">
+              <div class="event-time">{{ event.time_str.split(' - ')[0] }}</div>
+              <div>
+                <div class="event-title">{{ event.title }}</div>
+                <div class="event-meta">
+                  {{ event.duration_str }}
+                  {% if event.location %} &middot; {{ event.location }}{% endif %}
+                  {% if event.attendees %} &middot; {{ event.attendees | length }} people{% endif %}
+                </div>
+              </div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div style="font-size: 13px; color: var(--ink-3); padding: 6px 0 8px;">No events</div>
+          {% endif %}
+        </div>
+        {% endfor %}
       {% endif %}
+    </div>
 
-      <div class="card" style="margin-top: 16px;">
+    <!-- Right sidebar -->
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+
+      <div class="card">
         <div class="card-title">Quick Actions</div>
         <div class="quick-actions">
-          <a href="/generate" class="btn btn-primary">
+          <a href="/generate" class="btn btn-primary" style="width: 100%; justify-content: center;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
             Generate planner
           </a>
-          <a href="/calendars" class="btn btn-secondary">Manage calendars</a>
+          <a href="/calendars" class="btn btn-secondary" style="flex: 1; justify-content: center;">Manage calendars</a>
           {% if uploads %}
-          <a href="/download/{{ uploads[0].id }}" class="btn btn-secondary">Download last PDF</a>
+          <a href="/download/{{ uploads[0].id }}" class="btn btn-secondary" style="flex: 1; justify-content: center;">Download last PDF</a>
           {% endif %}
         </div>
       </div>
-    </div>
 
-    <!-- Right col: status + recent -->
-    <div>
       <div class="card">
         <div class="card-title">Connections</div>
         <div class="status-strip">
@@ -260,7 +287,6 @@
           <a href="/settings" class="badge badge-grey">Set up</a>
           {% endif %}
         </div>
-
         <div class="status-strip">
           <div class="status-strip-left">
             <div class="status-icon" style="background: #F3F0FF;">📡</div>
@@ -278,17 +304,17 @@
       </div>
 
       {% if uploads %}
-      <div class="card" style="margin-top: 16px;">
+      <div class="card">
         <div class="card-title">Recent Planners</div>
         {% for upload in uploads[:4] %}
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--rule);">
           <div>
-            <div style="font-size: 13.5px; font-weight: 500;">{{ upload.display_name }}</div>
-            <div style="font-size: 12px; color: var(--ink-3); font-family: var(--mono);">
+            <div style="font-size: 13px; font-weight: 500;">{{ upload.display_name }}</div>
+            <div style="font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); margin-top: 2px;">
               {{ upload.start_date }} → {{ upload.end_date }} &middot; {{ upload.event_count }} events
             </div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
             {% if upload.uploaded_to_rm %}
             <span class="badge badge-blue">on device</span>
             {% endif %}
@@ -298,13 +324,12 @@
         {% endfor %}
       </div>
       {% endif %}
-    </div>
 
+    </div>
   </div>
 </div>
 
 <script>
-  // Live countdown to next event
   {% if upcoming %}
   const nextStart = new Date("{{ upcoming[0].start.isoformat() }}");
   function updateCountdown() {
@@ -313,8 +338,7 @@
     if (!el) return;
     if (diff <= 0) { el.textContent = 'now'; return; }
     if (diff > 60) {
-      const h = Math.floor(diff / 60);
-      el.textContent = h + 'h ' + (diff % 60) + 'm';
+      el.textContent = Math.floor(diff / 60) + 'h ' + (diff % 60) + 'm';
     } else {
       el.textContent = diff;
     }
@@ -323,7 +347,6 @@
   setInterval(updateCountdown, 30000);
   {% endif %}
 
-  // Set today's date in subtitle
   document.querySelector('.page-subtitle').textContent =
     new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 </script>

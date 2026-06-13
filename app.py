@@ -129,23 +129,59 @@ async def dashboard(request: Request):
     feeds = await get_ical_feeds()
     uploads = await get_uploads(limit=5)
 
-    # Upcoming events preview (next 24h) if MS connected
-    upcoming = []
-    if ms_ok:
-        try:
-            from graph_connector import get_events
+    # Upcoming events — next 3 days from all sources
+    from calendar_manager import CalendarManager
+    from zoneinfo import ZoneInfo
+    tz_name = await get_setting("timezone") or "UTC"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+
+    upcoming_by_day = []   # list of (label, date_str, [events])
+    try:
+        manager = CalendarManager()
+        if ms_ok:
             token = await get_ms_token()
-            now = datetime.now(timezone.utc)
-            events = get_events(token, now, now + timedelta(hours=24))
-            upcoming = events[:5]
-        except Exception:
-            pass
+            manager.add_graph_source(token)
+        for feed in feeds:
+            if feed["enabled"] and feed.get("url"):
+                manager.add_ical_source(feed["url"], name=feed.get("name", "ICS Feed"))
+
+        now = datetime.now(timezone.utc)
+        events = manager.get_events(now, now + timedelta(days=3))
+
+        from collections import defaultdict
+        by_day = defaultdict(list)
+        for e in events:
+            if not e.is_all_day:
+                day_key = e.start.astimezone(tz).strftime("%Y-%m-%d")
+                by_day[day_key].append(e)
+
+        import datetime as dt_mod
+        today = datetime.now(tz).date()
+        for i in range(3):
+            d = today + dt_mod.timedelta(days=i)
+            key = d.strftime("%Y-%m-%d")
+            if i == 0:
+                label = "Today"
+            elif i == 1:
+                label = "Tomorrow"
+            else:
+                label = d.strftime("%A")
+            date_str = d.strftime("%-d %B")
+            upcoming_by_day.append((label, date_str, by_day.get(key, [])))
+    except Exception:
+        pass
+
+    upcoming = [e for _, _, evts in upcoming_by_day for e in evts]
 
     return templates.TemplateResponse(request, "dashboard.html", {
         "ms_connected": ms_ok,
         "feed_count": len([f for f in feeds if f["enabled"]]),
         "uploads": uploads,
         "upcoming": upcoming,
+        "upcoming_by_day": upcoming_by_day,
         "active": "dashboard",
     })
 
