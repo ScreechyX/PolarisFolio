@@ -292,12 +292,19 @@
   startEl.addEventListener('change', updateDaysBadge);
   endEl.addEventListener('change', updateDaysBadge);
 
+  function localDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
   function setRange(days) {
     const start = new Date();
     const end = new Date();
     end.setDate(end.getDate() + days);
-    startEl.value = start.toISOString().split('T')[0];
-    endEl.value = end.toISOString().split('T')[0];
+    startEl.value = localDateStr(start);
+    endEl.value = localDateStr(end);
     updateDaysBadge();
   }
 
@@ -305,8 +312,8 @@
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    startEl.value = start.toISOString().split('T')[0];
-    endEl.value = end.toISOString().split('T')[0];
+    startEl.value = localDateStr(start);
+    endEl.value = localDateStr(end);
     updateDaysBadge();
   }
 
