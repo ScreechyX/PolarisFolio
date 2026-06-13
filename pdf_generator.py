@@ -385,6 +385,8 @@ def draw_week_page(c: canvas.Canvas,
                    tz):
     """
     5-column Mon–Fri weekly spread with timed event blocks.
+    Matches Dayfolio layout: number-only headers, full-width all-day band,
+    FOCUS/PRIORITIES/HABIT CHART/TO DO LIST/NOTES bottom sections.
     """
     week_friday = week_monday + timedelta(days=4)
     month       = week_monday.month
@@ -395,8 +397,7 @@ def draw_week_page(c: canvas.Canvas,
     # Header
     month_str = week_monday.strftime("%B").upper()
     year_str  = str(week_monday.year)
-    # Combined "MONTH YEAR" in two weights
-    label = f"{month_str} {year_str}"
+    label     = f"{month_str} {year_str}"
 
     if week_monday.month == week_friday.month:
         date_range = (f"WEEK {week_num}  ·  "
@@ -419,89 +420,103 @@ def draw_week_page(c: canvas.Canvas,
     # ── Grid geometry ────────────────────────────────────────────────────────
     TIME_COL_W = 9 * mm
     DAY_COL_W  = (CONTENT_W - TIME_COL_W) / 5
-    BOTTOM_H   = 40 * mm          # reserved for FOCUS/PRIORITIES/NOTES
-    DAY_HDR_H  = 13 * mm          # day-number header above the time grid
-
-    grid_top = sep_y - DAY_HDR_H
-    grid_bot = MARGIN + BOTTOM_H
-    grid_h   = grid_top - grid_bot
-
-    n_hours  = HOUR_END - HOUR_START
-    slot_h   = grid_h / n_hours
+    BOTTOM_H   = 56 * mm          # FOCUS + PRIORITIES + TO DO LIST + NOTES
+    DAY_HDR_H  = 14 * mm          # day-number header band height
 
     today = date.today()
     days  = [week_monday + timedelta(days=i) for i in range(5)]
 
-    # ── Day column headers ───────────────────────────────────────────────────
-    hdr_top = sep_y - 1 * mm   # top of the day-header band
+    # Pre-collect unique all-day events across the week
+    all_day_evts: list = []
+    _seen: set = set()
+    for day in days:
+        for e in days_events.get(day.strftime("%Y-%m-%d"), []):
+            if e.is_all_day and e.title not in _seen:
+                all_day_evts.append(e)
+                _seen.add(e.title)
+    n_allday   = min(len(all_day_evts), 3)
+    ALLDAY_H   = n_allday * 4.5 * mm   # zone between header sep and time grid
 
+    # Y coordinates (top-down)
+    hdr_top      = sep_y - 1 * mm         # top of day-number band
+    hdr_sep_y    = sep_y - DAY_HDR_H      # rule between header & all-day zone
+    time_grid_top = hdr_sep_y - ALLDAY_H  # top of timed grid proper
+    grid_bot     = MARGIN + BOTTOM_H
+    grid_h       = time_grid_top - grid_bot
+
+    n_hours = HOUR_END - HOUR_START
+    slot_h  = grid_h / n_hours
+
+    # ── Day column headers (number only, coloured dot) ───────────────────────
     for i, day in enumerate(days):
-        cx      = MARGIN + TIME_COL_W + i * DAY_COL_W
-        is_td   = (day == today)
-        num_str = str(day.day)
-        abbr    = day.strftime("%a").upper()
+        cx    = MARGIN + TIME_COL_W + i * DAY_COL_W
+        is_td = (day == today)
 
         # Column separator (skip first)
         if i > 0:
-            vrule(c, cx, grid_bot, grid_h + DAY_HDR_H, col=C_GHOST, lw=0.4)
+            vrule(c, cx, grid_bot, time_grid_top + DAY_HDR_H + ALLDAY_H - grid_bot,
+                  col=C_GHOST, lw=0.4)
 
-        # Today column highlight
+        # Today column highlight (full height incl header)
         if is_td:
-            filled_rect(c, cx, grid_bot, DAY_COL_W, grid_h + DAY_HDR_H,
+            filled_rect(c, cx, grid_bot,
+                        DAY_COL_W, time_grid_top + DAY_HDR_H + ALLDAY_H - grid_bot,
                         fill=C_ACCENT_LT)
 
-        # Day abbreviation (small, grey, top)
-        txt(c, cx + DAY_COL_W / 2, hdr_top - 5 * mm, abbr,
-            size=6, bold=False, col=C_GREY, align="center")
-
-        # Day number (large)
+        # Day number — large, centred, no abbreviation
         num_col = C_ACCENT if is_td else C_INK
-        txt(c, cx + DAY_COL_W / 2, hdr_top - 12 * mm, num_str,
-            size=14, bold=True, col=num_col, align="center")
+        num_str = str(day.day)
+        num_cx  = cx + DAY_COL_W / 2
+        txt(c, num_cx, hdr_top - 11 * mm, num_str,
+            size=16, bold=True, col=num_col, align="center")
 
-    # Separator between day headers and time grid
-    hrule(c, MARGIN + TIME_COL_W, grid_top, CONTENT_W - TIME_COL_W,
+        # Small coloured dot to upper-right of number (nav indicator)
+        nw = c.stringWidth(num_str, "Helvetica-Bold", 16)
+        dot_col = _event_color(day.strftime("%B"))   # consistent per month
+        circle(c, num_cx + nw / 2 + 2.5 * mm,
+               hdr_top - 6 * mm, 1.8 * mm, fill=dot_col)
+
+    # Separator rule below day numbers
+    hrule(c, MARGIN + TIME_COL_W, hdr_sep_y, CONTENT_W - TIME_COL_W,
           col=C_SILVER, lw=0.5)
+
+    # ── All-day event bands (full-width, stacked) ────────────────────────────
+    ad_bar_h = 4 * mm
+    for ai, ade in enumerate(all_day_evts):
+        bar_bot = hdr_sep_y - (ai + 1) * (ad_bar_h + 0.5 * mm)
+        filled_rect(c, MARGIN + TIME_COL_W, bar_bot,
+                    CONTENT_W - TIME_COL_W, ad_bar_h,
+                    fill=_event_color(ade.title), r=1.5)
+        txt(c, MARGIN + TIME_COL_W + 3 * mm, bar_bot + 1 * mm,
+            ade.title, size=5, bold=True, col=C_WHITE,
+            max_w=CONTENT_W - TIME_COL_W - 6 * mm)
 
     # ── Time grid ────────────────────────────────────────────────────────────
     for i in range(n_hours + 1):
-        hour  = HOUR_START + i
-        y     = grid_top - i * slot_h
+        hour = HOUR_START + i
+        y    = time_grid_top - i * slot_h
 
-        # Hour label
+        # Hour label — digit only, very faint, right-aligned into gutter
         if i < n_hours:
-            lbl = f"{hour:02d}:00"
-            txt(c, MARGIN + TIME_COL_W - 1 * mm, y - 3, lbl,
-                size=5.5, col=C_SILVER, align="right")
+            txt(c, MARGIN + TIME_COL_W - 1.5 * mm, y - 3,
+                str(hour), size=5.5, col=C_SILVER, align="right")
 
-        # Full-width hour rule
+        # Hour rule
         hrule(c, MARGIN + TIME_COL_W, y, CONTENT_W - TIME_COL_W,
-              col=C_GHOST, lw=0.4)
+              col=C_GHOST, lw=0.35)
 
         # 30-min half rule (even lighter)
         if i < n_hours:
             hrule(c, MARGIN + TIME_COL_W, y - slot_h / 2,
                   CONTENT_W - TIME_COL_W,
-                  col=colors.HexColor("#F3F3F5"), lw=0.25)
+                  col=colors.HexColor("#F4F4F6"), lw=0.2)
 
-    # ── Event blocks ─────────────────────────────────────────────────────────
+    # ── Timed event blocks ───────────────────────────────────────────────────
     for di, day in enumerate(days):
         day_key = day.strftime("%Y-%m-%d")
         evts    = sorted(days_events.get(day_key, []), key=lambda e: e.start)
         cx      = MARGIN + TIME_COL_W + di * DAY_COL_W
 
-        # All-day strip (thin bar at the very top of the column header)
-        all_day = [e for e in evts if e.is_all_day]
-        for ai, ade in enumerate(all_day[:2]):
-            bar_y = hdr_top - 4.5 * mm - ai * 4.2 * mm
-            filled_rect(c, cx + 0.5, bar_y - 3.2 * mm,
-                        DAY_COL_W - 1, 3.2 * mm,
-                        fill=_event_color(ade.title), r=1)
-            txt(c, cx + 2 * mm, bar_y - 3.2 * mm + 0.8 * mm,
-                ade.title, size=4.5, bold=True, col=C_WHITE,
-                max_w=DAY_COL_W - 4 * mm)
-
-        # Timed events — simple lane-based overlap split
         timed = [e for e in evts if not e.is_all_day]
         lanes: list[list] = []
         for evt in timed:
@@ -526,73 +541,138 @@ def draw_week_page(c: canvas.Canvas,
                 sf = max(ls.hour + ls.minute / 60, HOUR_START) - HOUR_START
                 ef = min(le.hour + le.minute / 60, HOUR_END)   - HOUR_START
                 bh = (ef - sf) * slot_h - 1.5
-                bt = grid_top - sf * slot_h        # block top (y of top edge)
-                bb = bt - bh                        # block bottom
+                bt = time_grid_top - sf * slot_h
+                bb = bt - bh
 
                 ec = _event_color(evt.title)
-
-                # Block
                 filled_rect(c, lx, bb, lw, bh, fill=ec, r=2)
 
-                # Title
                 if bh > 5 * mm:
                     txt(c, lx + 2 * mm, bt - 4 * mm,
                         evt.title, size=5.5, bold=True, col=C_WHITE,
                         max_w=lw - 3 * mm)
-                # Time
                 if bh > 10 * mm:
                     t_str = f"{ls.strftime('%H:%M')}–{le.strftime('%H:%M')}"
                     txt(c, lx + 2 * mm, bt - 9 * mm,
                         t_str, size=4.5, col=C_WHITE, max_w=lw - 3 * mm)
 
-                # Tap → meeting note
                 if evt.id in event_page_map:
                     c.linkAbsolute("", f"event_{evt.id}",
                                    (lx, bb, lx + lw, bt))
 
-    # ── Bottom sections: FOCUS | PRIORITIES | NOTES ──────────────────────────
+    # ── Bottom sections ───────────────────────────────────────────────────────
     _draw_bottom_sections(c, MARGIN, MARGIN + BOTTOM_H, CONTENT_W)
 
 
 def _draw_bottom_sections(c: canvas.Canvas,
                            x: float, top_y: float, width: float):
     """
-    Three equal-width sections below the time grid.
-    FOCUS (lined)  |  PRIORITIES (numbered)  |  NOTES (lined)
+    Dayfolio-style bottom layout:
+
+      ┌──────────────────┬──────────────────────────────────────┐
+      │  FOCUS           │  PRIORITIES  (● 1  ● 2  ○ 3)        │
+      │  (vertical text) │  HABIT CHART (5-col mini grid)       │
+      ├──────────────────┴──────────────────────────────────────┤
+      │  TO DO LIST                │  NOTES                      │
+      └────────────────────────────┴─────────────────────────────┘
     """
-    sec_w  = width / 3
-    gap_y  = 1.5 * mm    # gap between label and first line
-    line_h = 6.5 * mm    # vertical spacing of writing lines
-    bot    = MARGIN + 1 * mm
+    bot     = MARGIN
+    total_h = top_y - bot
 
-    hrule(c, x, top_y, width, col=C_SILVER, lw=0.5)   # top boundary
+    # Row split: top 58% = FOCUS + PRIORITIES zone, bottom 42% = TO DO + NOTES
+    split_y  = bot + total_h * 0.42
+    top_h    = top_y - split_y
 
-    for idx, (label, numbered) in enumerate([
-            ("FOCUS", False), ("PRIORITIES", True), ("NOTES", False)]):
-        sx = x + idx * sec_w
+    FOCUS_W  = width * 0.37          # left portion of top row
+    PRIO_X   = x + FOCUS_W
+    PRIO_W   = width - FOCUS_W
 
-        # Vertical dividers between sections
-        if idx > 0:
-            vrule(c, sx, MARGIN, top_y - MARGIN, col=C_GHOST, lw=0.4)
+    line_h   = 5.8 * mm              # ruled line spacing
+    circ_r   = 3.2 * mm              # priority circle radius
 
-        # Section label
-        txt(c, sx + 2 * mm, top_y - 5 * mm, label,
-            size=6, bold=True, col=C_GREY, italic=False)
+    # ── Boundary rules ────────────────────────────────────────────────────────
+    hrule(c, x, top_y,  width, col=C_SILVER, lw=0.5)   # top edge
+    hrule(c, x, split_y, width, col=C_SILVER, lw=0.4)  # row divider
 
-        # Writing lines
-        ly = top_y - 5 * mm - gap_y - 1.5 * mm
-        n  = 1
-        while ly > bot:
-            lx2 = sx + sec_w - 2 * mm
-            if numbered:
-                txt(c, sx + 2 * mm, ly, str(n), size=6, col=C_SILVER)
-                hrule(c, sx + 6 * mm, ly - 1 * mm, sec_w - 8 * mm,
-                      col=C_GHOST, lw=0.35)
-                n += 1
-            else:
-                hrule(c, sx + 2 * mm, ly - 1 * mm, sec_w - 4 * mm,
-                      col=C_GHOST, lw=0.35)
-            ly -= line_h
+    # ── Vertical dividers ─────────────────────────────────────────────────────
+    vrule(c, PRIO_X,        split_y, top_h,    col=C_GHOST, lw=0.4)  # FOCUS | PRIO
+    vrule(c, x + width / 2, bot,     split_y - bot, col=C_GHOST, lw=0.4)  # TODO | NOTES
+
+    # ── FOCUS — rotated vertical label, ruled lines ───────────────────────────
+    # "FOCUS" rotated 90° reading bottom→top, centred vertically in the zone
+    c.saveState()
+    c.setFont("Helvetica-Bold", 6)
+    c.setFillColor(C_GREY)
+    c.translate(x + 4.5 * mm, (top_y + split_y) / 2)
+    c.rotate(90)
+    c.drawCentredString(0, 0, "FOCUS")
+    c.restoreState()
+
+    # Ruled lines in the FOCUS writing area
+    ly = top_y - 6 * mm
+    while ly > split_y + 2 * mm:
+        hrule(c, x + 9 * mm, ly, FOCUS_W - 11 * mm, col=C_GHOST, lw=0.3)
+        ly -= line_h
+
+    # ── PRIORITIES — numbered filled circles + writing lines ──────────────────
+    txt(c, PRIO_X + 3 * mm, top_y - 4.5 * mm, "PRIORITIES",
+        size=5.5, bold=True, col=C_GREY)
+
+    circ_cx = PRIO_X + 6 * mm
+    cy      = top_y - 11 * mm
+    for n in range(1, 4):
+        if cy - circ_r < split_y + 3 * mm:
+            break
+        # Filled circle: first two solid accent, third outlined
+        if n <= 2:
+            circle(c, circ_cx, cy, circ_r, fill=C_ACCENT)
+            c.setFont("Helvetica-Bold", 6)
+            c.setFillColor(C_WHITE)
+        else:
+            circle(c, circ_cx, cy, circ_r,
+                   fill=C_GHOST, stroke=C_SILVER, lw=0.5)
+            c.setFont("Helvetica-Bold", 6)
+            c.setFillColor(C_SILVER)
+        c.drawCentredString(circ_cx, cy - 2, str(n))
+        # Ruled line beside circle
+        line_x = circ_cx + circ_r + 2 * mm
+        hrule(c, line_x, cy, PRIO_W - circ_r * 2 - 10 * mm,
+              col=C_GHOST, lw=0.3)
+        cy -= circ_r * 2 + 2.5 * mm
+
+    # ── HABIT CHART — 5-col mini grid below priorities ────────────────────────
+    if cy > split_y + 8 * mm:
+        txt(c, PRIO_X + 3 * mm, cy + 1.5 * mm, "HABIT CHART",
+            size=5, bold=True, col=C_SILVER)
+        cy -= 5 * mm
+        cell_sz  = 4 * mm
+        cell_gap = 0.8 * mm
+        grid_x   = PRIO_X + 3 * mm
+        row_y    = cy
+        while row_y > split_y + cell_sz + 1 * mm:
+            for ci in range(5):
+                cx2 = grid_x + ci * (cell_sz + cell_gap)
+                c.setStrokeColor(C_GHOST)
+                c.setLineWidth(0.3)
+                c.rect(cx2, row_y - cell_sz, cell_sz, cell_sz, fill=0, stroke=1)
+            row_y -= cell_sz + cell_gap
+
+    # ── TO DO LIST (bottom-left) ──────────────────────────────────────────────
+    txt(c, x + 2 * mm, split_y - 4.5 * mm, "TO DO LIST",
+        size=5.5, bold=True, col=C_GREY)
+    ly = split_y - 10 * mm
+    while ly > bot + 2 * mm:
+        hrule(c, x + 2 * mm, ly, width / 2 - 4 * mm, col=C_GHOST, lw=0.3)
+        ly -= line_h
+
+    # ── NOTES (bottom-right) ──────────────────────────────────────────────────
+    txt(c, x + width / 2 + 2 * mm, split_y - 4.5 * mm, "NOTES",
+        size=5.5, bold=True, col=C_GREY)
+    ly = split_y - 10 * mm
+    while ly > bot + 2 * mm:
+        hrule(c, x + width / 2 + 2 * mm, ly, width / 2 - 4 * mm,
+              col=C_GHOST, lw=0.3)
+        ly -= line_h
 
 
 # ─────────────────────────────────────────────────────────────────────────────
