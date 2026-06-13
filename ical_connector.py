@@ -96,17 +96,19 @@ def parse_ical(
                                   extra_exdates=exc_datetimes.get(uid, []))
         events.extend(expanded)
 
-    # Orphaned exception instances (RECURRENCE-ID with no master in this feed window)
-    # — parse them as regular events rather than discarding them
+    # Exception instances (RECURRENCE-ID) — always parse these.
+    # The original occurrence was already removed from the master expansion via
+    # exc_datetimes/exdates, so this just adds the rescheduled/modified instance.
+    # Covers both: orphans (no master in feed window) and rescheduled instances
+    # (master exists but this occurrence was moved to a different day/time).
     for uid, components in exc_components.items():
-        if uid not in masters:
-            for component in components:
-                parsed = _parse_vevent(component, calendar_name)
-                if parsed is None:
-                    continue
-                if parsed.end < start_date or parsed.start > end_date:
-                    continue
-                events.append(parsed)
+        for component in components:
+            parsed = _parse_vevent(component, calendar_name)
+            if parsed is None:
+                continue
+            if parsed.end < start_date or parsed.start > end_date:
+                continue
+            events.append(parsed)
 
     # Parse non-recurring singles
     for component in singles:
