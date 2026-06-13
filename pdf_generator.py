@@ -326,7 +326,7 @@ def draw_page_header(c: canvas.Canvas,
 # Year overview page
 # ─────────────────────────────────────────────────────────────────────────────
 
-_MINI_DOW = ["M", "T", "W", "T", "F", "S", "S"]
+_MINI_DOW = ["S", "M", "T", "W", "T", "F", "S"]
 
 def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
                    active_months: set = None):
@@ -414,7 +414,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
 
         # Date cells
         first   = date(year, m, 1)
-        dow0    = first.weekday()   # 0=Mon
+        dow0    = (first.weekday() + 1) % 7   # 0=Sun
         _, n_days = calendar.monthrange(year, m)
         date_y0 = dow_y - 5 * mm   # y of the first date row
 
@@ -427,7 +427,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
 
             is_td   = (day_num == today.day and m == today.month
                        and year == today.year)
-            is_wknd = (grid_col >= 5)
+            is_wknd = (grid_col == 0 or grid_col == 6)   # Sun or Sat
 
             if is_td:
                 circle(c, dx, dy + 1.5 * mm, 2.8 * mm,
@@ -451,7 +451,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
 # Monthly overview page
 # ─────────────────────────────────────────────────────────────────────────────
 
-_DOW = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+_DOW = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
 
 def draw_month_page(c: canvas.Canvas, year: int, month: int,
                     events: list,
@@ -483,7 +483,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
         if loc.year == year and loc.month == month:
             ev_by_day.setdefault(loc.day, []).append(e)
 
-    cal_weeks = calendar.monthcalendar(year, month)
+    cal_weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
     n_weeks   = len(cal_weeks)
     today     = date.today()
 
@@ -505,7 +505,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
 
     for col, label in enumerate(_DOW):
         cx = MARGIN + WEEK_COL_W + col * WKDAY_W
-        is_wknd = col >= 5
+        is_wknd = col == 0 or col == 6   # Sun or Sat
         # Weekend column shading (full height of body)
         if is_wknd:
             filled_rect(c, cx, grid_bot,
@@ -540,7 +540,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                 continue
 
             cx    = MARGIN + WEEK_COL_W + col * WKDAY_W
-            is_wknd   = col >= 5
+            is_wknd   = col == 0 or col == 6   # Sun or Sat
             is_today  = (date(year, month, day_num) == today)
             day_key   = f"{year}-{month:02d}-{day_num:02d}"
 
