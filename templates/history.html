@@ -88,8 +88,22 @@
 
 {% if generating %}
 <script>
-  // Auto-refresh while generating
-  setTimeout(() => location.reload(), 8000);
+  // Poll until a new upload appears, then redirect cleanly (strips ?generating=1)
+  const knownLatest = {{ ('"' + uploads[0].created_at + '"') if uploads else 'null' }};
+
+  async function pollForCompletion() {
+    try {
+      const res = await fetch('/api/history/count');
+      const data = await res.json();
+      if (data.latest && data.latest !== knownLatest) {
+        window.location.href = '/history';
+        return;
+      }
+    } catch {}
+    setTimeout(pollForCompletion, 5000);
+  }
+
+  setTimeout(pollForCompletion, 5000);
 </script>
 {% endif %}
 

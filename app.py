@@ -491,6 +491,12 @@ async def save_settings(
 # API - event preview (for generate page)
 # ---------------------------------------------------------------------------
 
+@app.get("/api/history/count")
+async def history_count():
+    uploads = await get_uploads(limit=1)
+    return JSONResponse({"count": len(uploads), "latest": uploads[0]["created_at"] if uploads else None})
+
+
 @app.get("/api/events/count")
 async def event_count(start: str, end: str):
     """Returns event count for a date range - used by the generate form."""
