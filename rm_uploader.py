@@ -29,22 +29,24 @@ class RemarkableUploader:
             print(f"  Error: file not found - {pdf_path}")
             return False
 
-        target_folder = folder or self.folder or "/PolarisFolio"
+        target_folder = (folder or self.folder or "/PolarisFolio").rstrip("/")
         size_kb = os.path.getsize(pdf_path) / 1024
-        print(f"\nUploading '{display_name}' ({size_kb:.0f} KB) via rmapi...")
+        print(f"\nUploading '{display_name}' ({size_kb:.0f} KB) via rmapi to {target_folder}...")
+
+        home = os.path.expanduser("~")
+        env = {**os.environ, "HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config")}
 
         # Ensure folder exists
         try:
             subprocess.run(["rmapi", "mkdir", target_folder],
-                           capture_output=True, timeout=30)
+                           capture_output=True, text=True, timeout=30, env=env)
         except Exception:
             pass
 
-        target = f"{target_folder}/{display_name}"
         try:
             result = subprocess.run(
-                ["rmapi", "put", pdf_path, target],
-                capture_output=True, text=True, timeout=60,
+                ["rmapi", "put", pdf_path, target_folder],
+                capture_output=True, text=True, timeout=60, env=env,
             )
             if result.returncode == 0:
                 print(f"  rmapi: uploaded '{display_name}' to {target_folder}")
