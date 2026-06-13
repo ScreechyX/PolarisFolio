@@ -259,7 +259,7 @@
     const start = startEl.value;
     const end = endEl.value;
     if (!start || !end) return;
-    const days = Math.round((new Date(end) - new Date(start)) / 86400000);
+    const days = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
     badgeEl.textContent = days + ' day' + (days !== 1 ? 's' : '');
     // Hide the preview strip when dates change so stale count isn't shown
     document.getElementById('previewStrip').style.display = 'none';
@@ -302,7 +302,7 @@
   function setRange(days) {
     const start = new Date();
     const end = new Date();
-    end.setDate(end.getDate() + days);
+    end.setDate(end.getDate() + days - 1);
     startEl.value = localDateStr(start);
     endEl.value = localDateStr(end);
     updateDaysBadge();
