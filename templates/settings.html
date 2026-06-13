@@ -67,14 +67,49 @@
       <div class="card-title">reMarkable</div>
 
       <div class="form-group">
-        <label>Device token (REST API fallback)</label>
-        <input type="password" name="rm_token"
-          placeholder="Paste token from setup command"
+        <label>reMarkable email address</label>
+        <input type="email" name="rm_email"
+          value="{{ settings.get('rm_email', '') }}"
+          placeholder="yourname@remarkable.com"
           style="font-family: var(--mono); font-size: 13px;">
         <div class="form-hint">
-          Get a one-time code from my.remarkable.com/device/desktop/connect,
-          then run <span class="mono">python rm_uploader.py setup &lt;code&gt;</span>
-          and paste the token here. Leave blank if using rmapi CLI.
+          Find this on your device: Settings → Send to reMarkable.
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>SMTP host</label>
+        <input type="text" name="smtp_host"
+          value="{{ settings.get('smtp_host', '') }}"
+          placeholder="smtp.gmail.com"
+          style="font-family: var(--mono); font-size: 13px; max-width: 280px;">
+      </div>
+
+      <div class="form-group">
+        <label>SMTP port</label>
+        <input type="number" name="smtp_port"
+          value="{{ settings.get('smtp_port', '587') }}"
+          placeholder="587"
+          style="font-family: var(--mono); font-size: 13px; max-width: 100px;">
+        <div class="form-hint">587 (STARTTLS) is standard for Gmail and most providers.</div>
+      </div>
+
+      <div class="form-group">
+        <label>SMTP username</label>
+        <input type="text" name="smtp_user"
+          value="{{ settings.get('smtp_user', '') }}"
+          placeholder="you@gmail.com"
+          style="font-family: var(--mono); font-size: 13px; max-width: 280px;">
+      </div>
+
+      <div class="form-group">
+        <label>SMTP password / app password</label>
+        <input type="password" name="smtp_pass"
+          placeholder="Leave blank to keep existing"
+          style="font-family: var(--mono); font-size: 13px; max-width: 280px;">
+        <div class="form-hint">
+          For Gmail: use an App Password (requires 2FA).
+          <a href="https://myaccount.google.com/apppasswords" target="_blank">Generate one here.</a>
         </div>
       </div>
 
@@ -84,6 +119,7 @@
           value="{{ settings.get('rm_folder', '/PolarisFolio') }}"
           placeholder="/PolarisFolio"
           style="font-family: var(--mono); font-size: 13px; max-width: 200px;">
+        <div class="form-hint">Not used for email delivery — documents land in My files.</div>
       </div>
     </div>
 

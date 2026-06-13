@@ -370,7 +370,14 @@ async def _run_generation(
     uploaded = False
     if upload and os.path.exists(pdf_path):
         try:
-            uploader = RemarkableUploader()
+            rm_settings = {
+                "rm_email":   await get_setting("rm_email", ""),
+                "smtp_host":  await get_setting("smtp_host", ""),
+                "smtp_port":  await get_setting("smtp_port", "587"),
+                "smtp_user":  await get_setting("smtp_user", ""),
+                "smtp_pass":  await get_setting("smtp_pass", ""),
+            }
+            uploader = RemarkableUploader(rm_settings)
             uploaded = uploader.upload(display_name, pdf_path, folder=rm_folder)
         except Exception as e:
             print(f"Upload error: {e}")
@@ -434,7 +441,11 @@ async def settings_page(request: Request, success: str = None, error: str = None
 @app.post("/settings")
 async def save_settings(
     ms_client_id: str = Form(""),
-    rm_token: str = Form(""),
+    rm_email: str = Form(""),
+    smtp_host: str = Form(""),
+    smtp_port: str = Form("587"),
+    smtp_user: str = Form(""),
+    smtp_pass: str = Form(""),
     rm_folder: str = Form("/PolarisFolio"),
     timezone: str = Form("UTC"),
     schedule_enabled: str = Form("0"),
@@ -445,11 +456,12 @@ async def save_settings(
 ):
     if ms_client_id:
         await set_setting("ms_client_id", ms_client_id.strip())
-    if rm_token:
-        token_file = os.path.expanduser("~/.polarisfolio_rm_token")
-        with open(token_file, "w") as f:
-            f.write(rm_token.strip())
-        os.chmod(token_file, 0o600)
+    await set_setting("rm_email", rm_email.strip())
+    await set_setting("smtp_host", smtp_host.strip())
+    await set_setting("smtp_port", smtp_port.strip() or "587")
+    await set_setting("smtp_user", smtp_user.strip())
+    if smtp_pass:
+        await set_setting("smtp_pass", smtp_pass.strip())
     await set_setting("rm_folder", rm_folder.strip() or "/PolarisFolio")
     await set_setting("timezone", timezone.strip() or "UTC")
     await set_setting("schedule_enabled", schedule_enabled)
