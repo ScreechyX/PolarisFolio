@@ -324,7 +324,7 @@ async def generate_page(request: Request, success: str = None, error: str = None
     has_sources = ms_ok or len(feeds) > 0
 
     today = date.today()
-    default_end = today + timedelta(days=14)
+    default_end = today + timedelta(days=30)
 
     return templates.TemplateResponse(request, "generate.html", {
         "ms_connected": ms_ok,
