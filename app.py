@@ -486,6 +486,46 @@ async def save_settings(
 # API - event preview (for generate page)
 # ---------------------------------------------------------------------------
 
+@app.get("/api/debug/events")
+async def debug_events(start: str, end: str):
+    """Debug: show all events parsed from sources for a date range."""
+    try:
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+    except ValueError:
+        return JSONResponse({"error": "invalid dates"})
+
+    from zoneinfo import ZoneInfo
+    from calendar_manager import CalendarManager
+    tz = ZoneInfo(await get_setting("timezone", "UTC"))
+    start_dt = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0, tzinfo=tz)
+    end_dt = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, tzinfo=tz)
+
+    manager = CalendarManager()
+    token = await get_ms_token()
+    if token:
+        manager.add_graph_source(token)
+    feeds = await get_ical_feeds(enabled_only=True)
+    for f in feeds:
+        manager.add_ical_source(url=f["url"], name=f["name"])
+
+    events = manager.get_events(start_dt, end_dt)
+    tz_obj = ZoneInfo(await get_setting("timezone", "UTC"))
+    return JSONResponse({
+        "count": len(events),
+        "events": [
+            {
+                "title": e.title,
+                "start": e.start.astimezone(tz_obj).strftime("%Y-%m-%d %H:%M"),
+                "end": e.end.astimezone(tz_obj).strftime("%Y-%m-%d %H:%M"),
+                "source": e.source,
+                "calendar": e.calendar_name,
+            }
+            for e in events
+        ]
+    })
+
+
 @app.get("/api/history/count")
 async def history_count():
     uploads = await get_uploads(limit=1)
