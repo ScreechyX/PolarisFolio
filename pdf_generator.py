@@ -1,10 +1,10 @@
 """
-PDF generator for the PolarisFolio-style planner.
+PDF generator for the PolarisFolio planner — Dayfolio-style weekly spread.
 
 Produces a hyperlinked PDF with:
-  - Monthly overview page (tap a day to jump to its daily page)
-  - Daily pages with timed schedule slots (tap an event to jump to its note page)
-  - Per-event meeting note pages with metadata + lined writing area
+  - Monthly overview page  (tap a day → weekly page)
+  - Weekly spread pages    (Mon–Fri columns, timed event blocks)
+  - Per-event meeting note pages (metadata + lined writing area)
 
 Optimised for reMarkable Paper Pro (A4 portrait, clean minimal style).
 """
@@ -23,47 +23,71 @@ from reportlab.lib.units import mm
 from models import CalendarEvent
 
 # ---------------------------------------------------------------------------
-# Page dimensions (A4 = 210 x 297 mm)
+# Page dimensions (A4 = 210 × 297 mm)
 # ---------------------------------------------------------------------------
 PAGE_W, PAGE_H = A4
 MARGIN = 14 * mm
-CONTENT_W = PAGE_W - 2 * MARGIN
+TAB_W  = 7 * mm          # right-edge month tab width
+CONTENT_W = PAGE_W - 2 * MARGIN - TAB_W
 
 # ---------------------------------------------------------------------------
-# Colour palette (minimal, reMarkable-friendly)
+# Colour palette
 # ---------------------------------------------------------------------------
 C_BLACK      = colors.HexColor("#1A1A1A")
 C_DARK_GREY  = colors.HexColor("#444444")
 C_MID_GREY   = colors.HexColor("#888888")
 C_LIGHT_GREY = colors.HexColor("#CCCCCC")
 C_RULE       = colors.HexColor("#E8E8E8")
-C_ACCENT     = colors.HexColor("#5C6BC0")   # indigo - tap targets / event blocks
-C_ACCENT_BG  = colors.HexColor("#EEF0FB")   # light indigo for event chips
+C_ACCENT     = colors.HexColor("#5C6BC0")
+C_ACCENT_BG  = colors.HexColor("#EEF0FB")
 C_WHITE      = colors.white
 
-# ---------------------------------------------------------------------------
-# Typography helpers
-# ---------------------------------------------------------------------------
+# Pastel event block colours (Dayfolio-inspired) — solid fill, white text
+EVENT_COLORS = [
+    colors.HexColor("#7ECFCF"),   # teal
+    colors.HexColor("#C8A8E8"),   # lavender
+    colors.HexColor("#F4A8C0"),   # rose
+    colors.HexColor("#F9DC90"),   # yellow
+    colors.HexColor("#90C4F4"),   # sky blue
+    colors.HexColor("#A8E8B4"),   # mint
+    colors.HexColor("#F4C090"),   # peach
+]
 
-def set_font(c: canvas.Canvas, size: float, bold: bool = False, grey: bool = False):
-    font = "Helvetica-Bold" if bold else "Helvetica"
-    c.setFont(font, size)
-    c.setFillColor(C_DARK_GREY if grey else C_BLACK)
+# Right-edge tab colour per month (Jan=0 … Dec=11)
+MONTH_TAB_COLORS = [
+    "#A8D8EA", "#B0E0D8", "#C8D0F0", "#D8C0E8",   # Jan–Apr
+    "#E8C0D0", "#F4D4A0", "#F4E8A0", "#D8F0C0",   # May–Aug
+    "#C0E8D0", "#A8C8E8", "#C0A8D8", "#E8B8C0",   # Sep–Dec
+]
 
+HOUR_START = 7
+HOUR_END   = 19
+
+
+def _event_color(title: str) -> colors.Color:
+    """Consistent pastel colour based on event title hash."""
+    return EVENT_COLORS[hash(title) % len(EVENT_COLORS)]
+
+
+def _week_monday(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+# ---------------------------------------------------------------------------
+# Drawing helpers
+# ---------------------------------------------------------------------------
 
 def draw_text(c: canvas.Canvas, x: float, y: float, text: str,
               size: float = 9, bold: bool = False,
               color=None, align: str = "left", max_width: float = None):
-    """Draw text with optional truncation and alignment."""
     font = "Helvetica-Bold" if bold else "Helvetica"
     c.setFont(font, size)
     c.setFillColor(color or C_BLACK)
-
-    if max_width and c.stringWidth(text, font, size) > max_width:
-        while text and c.stringWidth(text + "…", font, size) > max_width:
+    if max_width:
+        while text and c.stringWidth(text, font, size) > max_width:
             text = text[:-1]
-        text = text + "…"
-
+        if len(text) < len(text):      # was truncated
+            text = text[:-1] + "…"
     if align == "right":
         c.drawRightString(x, y, text)
     elif align == "center":
@@ -72,24 +96,20 @@ def draw_text(c: canvas.Canvas, x: float, y: float, text: str,
         c.drawString(x, y, text)
 
 
-def _time_str(event, tz: ZoneInfo) -> str:
-    """Returns a display time string for an event in the given timezone."""
-    if event.is_all_day:
-        return "All day"
-    start = event.start.astimezone(tz)
-    end = event.end.astimezone(tz)
-    return f"{start.strftime('%I:%M %p')} - {end.strftime('%I:%M %p')}"
-
-
-def draw_rule(c: canvas.Canvas, x: float, y: float, width: float,
-              color=None, thickness: float = 0.4):
+def draw_rule(c: canvas.Canvas, x, y, width, color=None, thickness=0.4):
     c.setStrokeColor(color or C_RULE)
     c.setLineWidth(thickness)
     c.line(x, y, x + width, y)
 
 
-def draw_rect(c: canvas.Canvas, x: float, y: float, w: float, h: float,
-              fill_color=None, stroke_color=None, radius: float = 2):
+def draw_rule_v(c: canvas.Canvas, x, y_bottom, height, color=None, thickness=0.3):
+    c.setStrokeColor(color or C_RULE)
+    c.setLineWidth(thickness)
+    c.line(x, y_bottom, x, y_bottom + height)
+
+
+def draw_rect(c: canvas.Canvas, x, y, w, h,
+              fill_color=None, stroke_color=None, radius=2):
     c.setFillColor(fill_color or C_WHITE)
     c.setStrokeColor(stroke_color or C_LIGHT_GREY)
     c.setLineWidth(0.5)
@@ -98,27 +118,34 @@ def draw_rect(c: canvas.Canvas, x: float, y: float, w: float, h: float,
                 stroke=1 if stroke_color else 0)
 
 
+def _time_str(event, tz) -> str:
+    if event.is_all_day:
+        return "All day"
+    s = event.start.astimezone(tz)
+    e = event.end.astimezone(tz)
+    return f"{s.strftime('%I:%M %p')} – {e.strftime('%I:%M %p')}"
+
+
 # ---------------------------------------------------------------------------
-# Page header (shared across all page types)
+# Right-edge month tab
 # ---------------------------------------------------------------------------
 
-def draw_header(c: canvas.Canvas, title: str, subtitle: str = "",
-                page_label: str = ""):
-    y = PAGE_H - MARGIN - 6 * mm
+def draw_month_tab(c: canvas.Canvas, month: int, label: str = None):
+    """Draws the coloured right-edge tab for the given month (1-based)."""
+    col = colors.HexColor(MONTH_TAB_COLORS[(month - 1) % 12])
+    tab_x = PAGE_W - TAB_W
+    c.setFillColor(col)
+    c.rect(tab_x, 0, TAB_W, PAGE_H, fill=1, stroke=0)
 
-    draw_text(c, MARGIN, y, title, size=15, bold=True)
-
-    if subtitle:
-        draw_text(c, MARGIN, y - 6 * mm, subtitle, size=9, color=C_MID_GREY)
-
-    if page_label:
-        draw_text(c, PAGE_W - MARGIN, y, page_label,
-                  size=8, color=C_MID_GREY, align="right")
-
-    rule_y = PAGE_H - MARGIN - 14 * mm
-    draw_rule(c, MARGIN, rule_y, CONTENT_W, color=C_LIGHT_GREY, thickness=0.6)
-
-    return rule_y - 4 * mm   # return y to start content below header
+    # Month abbreviation rotated 90° (reads bottom → top)
+    abbr = (label or datetime(2026, month, 1).strftime("%b")).upper()
+    c.saveState()
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 6)
+    c.translate(tab_x + TAB_W / 2, PAGE_H / 2)
+    c.rotate(90)
+    c.drawCentredString(0, -2, abbr)
+    c.restoreState()
 
 
 # ---------------------------------------------------------------------------
@@ -127,42 +154,53 @@ def draw_header(c: canvas.Canvas, title: str, subtitle: str = "",
 
 def draw_month_page(c: canvas.Canvas, year: int, month: int,
                     events: list[CalendarEvent],
-                    day_page_map: dict[str, int]):
+                    day_week_map: dict[str, str]):
     """
-    Draws a monthly calendar grid. Each day cell is a tap target
-    linking to the corresponding daily page.
+    Monthly calendar grid. Each day cell links to its weekly page.
+    day_week_map: "YYYY-MM-DD" -> bookmark key of the containing week page.
     """
-    month_name = datetime(year, month, 1).strftime("%B %Y")
-    content_y = draw_header(c, month_name, "Monthly Overview")
+    draw_month_tab(c, month)
 
-    # Group events by day number
-    events_by_day: dict[int, list[CalendarEvent]] = {}
+    month_name = datetime(year, month, 1).strftime("%B").upper()
+    year_str   = str(year)
+
+    # Header
+    header_y = PAGE_H - MARGIN - 6 * mm
+    c.setFont("Helvetica-Bold", 15)
+    c.setFillColor(C_BLACK)
+    c.drawString(MARGIN, header_y, month_name)
+    mw = c.stringWidth(month_name, "Helvetica-Bold", 15)
+    c.setFont("Helvetica", 15)
+    c.setFillColor(C_LIGHT_GREY)
+    c.drawString(MARGIN + mw + 3 * mm, header_y, year_str)
+
+    draw_rule(c, MARGIN, header_y - 9 * mm, CONTENT_W, color=C_LIGHT_GREY, thickness=0.5)
+
+    # Group events by day
+    events_by_day: dict[int, list] = {}
     for e in events:
-        d = e.start.day
         if e.start.month == month and e.start.year == year:
-            events_by_day.setdefault(d, []).append(e)
+            events_by_day.setdefault(e.start.day, []).append(e)
 
-    # Calendar grid
     cal = calendar.monthcalendar(year, month)
     num_weeks = len(cal)
 
-    grid_top = content_y - 8 * mm
-    grid_h = grid_top - MARGIN - 4 * mm
-    cell_w = CONTENT_W / 7
-    cell_h = grid_h / num_weeks
+    grid_top = header_y - 14 * mm
+    grid_h   = grid_top - MARGIN - 4 * mm
+    cell_w   = CONTENT_W / 7
+    cell_h   = grid_h / num_weeks
 
-    # Day-of-week headers
-    dow_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    header_h = 7 * mm
+    # Day-of-week headers (Mon … Sun)
+    dow_labels = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
     for col, label in enumerate(dow_labels):
         x = MARGIN + col * cell_w
         is_weekend = col >= 5
         draw_text(c, x + cell_w / 2, grid_top - 4 * mm, label,
-                  size=7, bold=True,
+                  size=6.5, bold=True,
                   color=C_MID_GREY if is_weekend else C_DARK_GREY,
                   align="center")
 
-    cell_top = grid_top - header_h
+    cell_top = grid_top - 7 * mm
     today = date.today()
 
     for row, week in enumerate(cal):
@@ -172,12 +210,11 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
 
             x = MARGIN + col * cell_w
             y = cell_top - (row + 1) * cell_h
-            is_today = (date(year, month, day_num) == today)
+            is_today   = (date(year, month, day_num) == today)
             is_weekend = col >= 5
             day_key = f"{year}-{month:02d}-{day_num:02d}"
-            has_events = day_num in events_by_day
 
-            # Cell background
+            # Today highlight
             if is_today:
                 draw_rect(c, x + 1, y + 1, cell_w - 2, cell_h - 2,
                           fill_color=C_ACCENT_BG, stroke_color=C_ACCENT, radius=3)
@@ -187,28 +224,23 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
             draw_text(c, x + 3 * mm, y + cell_h - 5 * mm, str(day_num),
                       size=9, bold=is_today, color=num_color)
 
-            # Event count dot
-            if has_events:
-                count = len(events_by_day[day_num])
-                dot_x = x + cell_w - 5 * mm
-                dot_y = y + cell_h - 4 * mm
-                c.setFillColor(C_ACCENT)
-                c.circle(dot_x, dot_y, 2, fill=1, stroke=0)
-
-                # Show first event title (truncated)
-                first = events_by_day[day_num][0]
+            # Events in cell
+            if day_num in events_by_day:
+                day_evts = events_by_day[day_num]
+                # First event name
                 draw_text(c, x + 2 * mm, y + cell_h - 9 * mm,
-                          first.title, size=5.5, color=C_DARK_GREY,
+                          day_evts[0].title, size=5, color=C_DARK_GREY,
                           max_width=cell_w - 4 * mm)
+                # Dot if more
+                if len(day_evts) > 1:
+                    c.setFillColor(C_ACCENT)
+                    c.circle(x + cell_w - 4 * mm, y + cell_h - 4 * mm,
+                             1.5, fill=1, stroke=0)
 
-            # Tap target -> daily page
-            if day_key in day_page_map:
-                page_num = day_page_map[day_key]
-                c.linkAbsolute(
-                    "",
-                    f"day_{day_key}",
-                    (x + 1, y + 1, x + cell_w - 1, y + cell_h - 1),
-                )
+            # Tap target → weekly page
+            if day_key in day_week_map:
+                c.linkAbsolute("", day_week_map[day_key],
+                               (x + 1, y + 1, x + cell_w - 1, y + cell_h - 1))
 
             # Cell border
             c.setStrokeColor(C_RULE)
@@ -217,118 +249,221 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
 
 
 # ---------------------------------------------------------------------------
-# Daily page
+# Weekly spread page
 # ---------------------------------------------------------------------------
 
-HOUR_START = 7    # 7am
-HOUR_END   = 19   # 7pm
-HOURS      = HOUR_END - HOUR_START
-
-def draw_day_page(c: canvas.Canvas, day: date,
-                  events: list[CalendarEvent],
-                  event_page_map: dict[str, int],
-                  month_page_num: int,
-                  tz: ZoneInfo = None):
+def draw_week_page(c: canvas.Canvas,
+                   week_monday: date,
+                   days_events: dict[str, list[CalendarEvent]],
+                   event_page_map: dict[str, int],
+                   tz: ZoneInfo):
     """
-    Draws a daily schedule page with hourly time slots.
-    Each event block is a tap target linking to its meeting note page.
+    5-column weekly spread (Mon–Fri) with timed event blocks.
+    Dayfolio-inspired: large day numbers, pastel event blocks, bottom sections.
     """
-    tz = tz or timezone.utc
-    day_label = day.strftime("%A")
-    date_label = day.strftime("%-d %B %Y")
-    month_back = day.strftime("%B %Y")
+    week_friday = week_monday + timedelta(days=4)
+    month = week_monday.month
+    week_num = week_monday.isocalendar()[1]
 
-    content_y = draw_header(c, day_label, date_label)
+    draw_month_tab(c, month)
 
-    # Back link to monthly page
-    c.setFont("Helvetica", 7)
-    c.setFillColor(C_ACCENT)
-    back_x = PAGE_W - MARGIN
-    back_y = PAGE_H - MARGIN - 6 * mm
-    c.drawRightString(back_x, back_y, f"< {month_back}")
-    c.linkAbsolute("", f"month_{day.year}_{day.month:02d}",
-                   (back_x - 30 * mm, back_y - 2 * mm, back_x, back_y + 4 * mm))
+    # ---------- Header ----------
+    header_y = PAGE_H - MARGIN - 6 * mm
+    month_name = week_monday.strftime("%B").upper()
+    year_str   = str(week_monday.year)
 
-    # Time grid
-    grid_top = content_y - 2 * mm
-    grid_bottom = MARGIN + 4 * mm
-    grid_h = grid_top - grid_bottom
-    slot_h = grid_h / HOURS
+    c.setFont("Helvetica-Bold", 14)
+    c.setFillColor(C_BLACK)
+    c.drawString(MARGIN, header_y, month_name)
+    mw = c.stringWidth(month_name, "Helvetica-Bold", 14)
 
-    time_col_w = 12 * mm
-    event_col_x = MARGIN + time_col_w
-    event_col_w = CONTENT_W - time_col_w
+    c.setFont("Helvetica", 14)
+    c.setFillColor(C_LIGHT_GREY)
+    c.drawString(MARGIN + mw + 3 * mm, header_y, year_str)
 
-    # Hour rows
-    for i in range(HOURS + 1):
+    # Week number (top right, inside content area)
+    draw_text(c, MARGIN + CONTENT_W, header_y, str(week_num),
+              size=9, color=C_MID_GREY, align="right")
+
+    # "WEEKLY PLAN" centred
+    c.setFont("Helvetica", 6.5)
+    c.setFillColor(C_LIGHT_GREY)
+    c.drawCentredString(MARGIN + CONTENT_W / 2, header_y, "WEEKLY PLAN")
+
+    # Week date range
+    if week_monday.month == week_friday.month:
+        date_range = f"WEEK {week_num}  ·  {week_monday.strftime('%-d')} – {week_friday.strftime('%-d %b').upper()}"
+    else:
+        date_range = f"WEEK {week_num}  ·  {week_monday.strftime('%-d %b').upper()} – {week_friday.strftime('%-d %b').upper()}"
+
+    draw_text(c, MARGIN, header_y - 6 * mm, date_range,
+              size=7, bold=True, color=C_DARK_GREY)
+
+    sep_y = header_y - 10 * mm
+    draw_rule(c, MARGIN, sep_y, CONTENT_W, color=C_LIGHT_GREY, thickness=0.5)
+
+    # ---------- Grid layout ----------
+    time_col_w = 9 * mm
+    day_col_w  = (CONTENT_W - time_col_w) / 5
+
+    bottom_h   = 38 * mm
+    grid_top   = sep_y - 12 * mm   # leave room for day number headers
+    day_hdr_y  = sep_y - 2 * mm    # y for day numbers (just below sep line)
+    grid_bottom = MARGIN + bottom_h
+    grid_h     = grid_top - grid_bottom
+
+    num_hours  = HOUR_END - HOUR_START
+    slot_h     = grid_h / num_hours
+
+    # ---------- Day column headers ----------
+    days = [week_monday + timedelta(days=i) for i in range(5)]
+    today = date.today()
+
+    for i, day in enumerate(days):
+        col_x = MARGIN + time_col_w + i * day_col_w
+        is_today = (day == today)
+
+        # Day number
+        num_color = C_ACCENT if is_today else C_BLACK
+        day_num_str = str(day.day)
+        c.setFont("Helvetica-Bold" if is_today else "Helvetica", 13)
+        c.setFillColor(num_color)
+        c.drawString(col_x + 2 * mm, day_hdr_y - 4 * mm, day_num_str)
+
+        # Day abbreviation (small, grey)
+        draw_text(c, col_x + 2 * mm, day_hdr_y - 9 * mm,
+                  day.strftime("%a").upper(), size=5.5, color=C_MID_GREY)
+
+        # Vertical column separator
+        if i > 0:
+            draw_rule_v(c, col_x, grid_bottom, grid_h + 12 * mm,
+                        color=C_RULE, thickness=0.3)
+
+    # ---------- Horizontal time rules ----------
+    for i in range(num_hours + 1):
         hour = HOUR_START + i
         y = grid_top - i * slot_h
 
-        # Hour label
-        label = f"{hour:02d}:00"
-        draw_text(c, MARGIN, y - 1 * mm, label, size=7, color=C_MID_GREY)
+        # Hour label (left of grid)
+        if i < num_hours:
+            label = f"{hour:02d}"
+            draw_text(c, MARGIN, y - 1 * mm, label, size=5.5, color=C_LIGHT_GREY)
 
-        # Rule
-        draw_rule(c, event_col_x, y, event_col_w,
-                  color=C_RULE if hour % 2 == 0 else C_RULE,
-                  thickness=0.4 if hour % 2 == 0 else 0.2)
+        # Rule across all day columns
+        draw_rule(c, MARGIN + time_col_w, y, CONTENT_W - time_col_w,
+                  color=C_RULE, thickness=0.35)
 
-    # All-day events strip
-    all_day = [e for e in events if e.is_all_day]
-    timed = [e for e in events if not e.is_all_day]
+        # 30-min half-hour rule (lighter)
+        if i < num_hours:
+            half_y = y - slot_h / 2
+            draw_rule(c, MARGIN + time_col_w, half_y, CONTENT_W - time_col_w,
+                      color=colors.HexColor("#F2F2F2"), thickness=0.2)
 
-    if all_day:
-        strip_y = grid_top + 2 * mm
-        for i, e in enumerate(all_day[:3]):
-            ex = event_col_x + i * (event_col_w / 3)
-            ew = event_col_w / 3 - 1 * mm
-            draw_rect(c, ex, strip_y - 4 * mm, ew, 4 * mm,
-                      fill_color=C_ACCENT_BG, stroke_color=C_ACCENT)
-            draw_text(c, ex + 2 * mm, strip_y - 3 * mm,
-                      e.title, size=6, color=C_ACCENT,
-                      max_width=ew - 4 * mm)
+    # ---------- Event blocks ----------
+    for day_idx, day in enumerate(days):
+        day_key = day.strftime("%Y-%m-%d")
+        day_evts = sorted(days_events.get(day_key, []), key=lambda e: e.start)
+        col_x = MARGIN + time_col_w + day_idx * day_col_w
 
-    # Timed event blocks
-    for event in timed:
-        local_start = event.start.astimezone(tz)
-        local_end = event.end.astimezone(tz)
-        if local_start.hour < HOUR_START or local_start.hour >= HOUR_END:
-            continue
+        # All-day strip (thin bar under day number)
+        all_day = [e for e in day_evts if e.is_all_day]
+        for ad_i, ad_evt in enumerate(all_day[:2]):
+            bar_y = day_hdr_y - 10 * mm - ad_i * 4 * mm
+            c.setFillColor(_event_color(ad_evt.title))
+            c.roundRect(col_x + 1, bar_y, day_col_w - 2, 3.5 * mm, 1, fill=1, stroke=0)
+            draw_text(c, col_x + 2 * mm, bar_y + 0.8 * mm,
+                      ad_evt.title, size=5, color=colors.white,
+                      max_width=day_col_w - 4 * mm)
 
-        start_offset = (local_start.hour - HOUR_START) + local_start.minute / 60
-        end_hour = min(local_end.hour + local_end.minute / 60, HOUR_END)
-        end_offset = end_hour - HOUR_START
-        duration_slots = end_offset - start_offset
+        # Timed events — detect overlaps and split width
+        timed = [e for e in day_evts if not e.is_all_day]
 
-        ey = grid_top - end_offset * slot_h
-        eh = duration_slots * slot_h - 1
+        # Simple overlap detection: group events into non-overlapping lanes
+        lanes: list[list] = []
+        for evt in timed:
+            placed = False
+            for lane in lanes:
+                last = lane[-1]
+                last_end = last.end.astimezone(tz)
+                evt_start = evt.start.astimezone(tz)
+                if evt_start >= last_end:
+                    lane.append(evt)
+                    placed = True
+                    break
+            if not placed:
+                lanes.append([evt])
 
-        # Event block
-        draw_rect(c, event_col_x + 1, ey, event_col_w - 2, eh,
-                  fill_color=C_ACCENT_BG, stroke_color=C_ACCENT, radius=2)
+        num_lanes = len(lanes)
 
-        # Event title
-        draw_text(c, event_col_x + 3 * mm, ey + eh - 4 * mm,
-                  event.title, size=7.5, bold=True, color=C_ACCENT,
-                  max_width=event_col_w - 8 * mm)
+        for lane_idx, lane in enumerate(lanes):
+            lane_x = col_x + lane_idx * (day_col_w / max(num_lanes, 1))
+            lane_w = day_col_w / max(num_lanes, 1)
 
-        # Time + duration
-        if eh > 8 * mm:
-            meta = f"{_time_str(event, tz)}  {event.duration_str}"
-            draw_text(c, event_col_x + 3 * mm, ey + eh - 9 * mm,
-                      meta, size=6, color=C_DARK_GREY,
-                      max_width=event_col_w - 8 * mm)
+            for evt in lane:
+                local_start = evt.start.astimezone(tz)
+                local_end   = evt.end.astimezone(tz)
 
-        # Location
-        if event.location and eh > 13 * mm:
-            draw_text(c, event_col_x + 3 * mm, ey + eh - 13 * mm,
-                      event.location, size=6, color=C_MID_GREY,
-                      max_width=event_col_w - 8 * mm)
+                if local_start.hour >= HOUR_END or local_end.hour < HOUR_START:
+                    continue
 
-        # Tap target -> meeting note page
-        if event.id in event_page_map:
-            c.linkAbsolute("", f"event_{event.id}",
-                           (event_col_x + 1, ey, event_col_x + event_col_w - 1, ey + eh))
+                start_frac = max(local_start.hour + local_start.minute / 60, HOUR_START) - HOUR_START
+                end_frac   = min(local_end.hour   + local_end.minute   / 60, HOUR_END)   - HOUR_START
+                block_h    = (end_frac - start_frac) * slot_h - 1
+                block_top  = grid_top - start_frac * slot_h
+                block_bot  = block_top - block_h
+
+                evt_col = _event_color(evt.title)
+
+                # Block fill (rounded)
+                c.setFillColor(evt_col)
+                c.setLineWidth(0)
+                c.roundRect(lane_x + 0.5, block_bot, lane_w - 1, block_h, 2,
+                            fill=1, stroke=0)
+
+                # Title (white)
+                if block_h > 4 * mm:
+                    draw_text(c, lane_x + 2 * mm, block_top - 4 * mm,
+                              evt.title, size=5.5, bold=True, color=colors.white,
+                              max_width=lane_w - 4 * mm)
+
+                # Time (white, smaller)
+                if block_h > 9 * mm:
+                    t_str = f"{local_start.strftime('%H:%M')}–{local_end.strftime('%H:%M')}"
+                    draw_text(c, lane_x + 2 * mm, block_top - 8.5 * mm,
+                              t_str, size=4.5, color=colors.white,
+                              max_width=lane_w - 4 * mm)
+
+                # Tap target → meeting note page
+                if evt.id in event_page_map:
+                    c.linkAbsolute("", f"event_{evt.id}",
+                                   (lane_x + 0.5, block_bot, lane_x + lane_w - 0.5, block_top))
+
+    # ---------- Bottom sections: FOCUS | PRIORITIES | NOTES ----------
+    sect_top = grid_bottom - 1 * mm
+    sect_w   = CONTENT_W / 3
+
+    for idx, (label, numbered) in enumerate([("FOCUS", False),
+                                              ("PRIORITIES", True),
+                                              ("NOTES", False)]):
+        sx = MARGIN + idx * sect_w
+
+        # Section heading
+        draw_text(c, sx, sect_top, label, size=5.5, bold=True, color=C_MID_GREY)
+        draw_rule(c, sx, sect_top - 2 * mm, sect_w - 2 * mm, color=C_RULE, thickness=0.5)
+
+        # Lines / numbered lines
+        ly = sect_top - 7 * mm
+        line_num = 1
+        while ly > MARGIN + 1 * mm:
+            if numbered:
+                draw_text(c, sx, ly, str(line_num), size=6, color=C_LIGHT_GREY)
+                draw_rule(c, sx + 4 * mm, ly - 1 * mm, sect_w - 6 * mm,
+                          color=C_RULE, thickness=0.3)
+                line_num += 1
+            else:
+                draw_rule(c, sx, ly - 1 * mm, sect_w - 2 * mm,
+                          color=C_RULE, thickness=0.3)
+            ly -= 6 * mm
 
 
 # ---------------------------------------------------------------------------
@@ -336,133 +471,116 @@ def draw_day_page(c: canvas.Canvas, day: date,
 # ---------------------------------------------------------------------------
 
 def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
-                      day_page_num: int, tz: ZoneInfo = None):
-    """
-    Draws a meeting note page for a single event.
-    Includes metadata header and a lined writing area below.
-    """
+                      week_bookmark: str, tz: ZoneInfo = None):
+    """Meeting notes: metadata header + lined writing area."""
     tz = tz or timezone.utc
     local_start = event.start.astimezone(tz)
-    day_label = local_start.strftime("%A %-d %B")
-    time_label = _time_str(event, tz)
-    content_y = draw_header(c, event.title, day_label,
-                            page_label=time_label)
+    month = local_start.month
 
-    # Back link to daily page
-    day_key = event.start.strftime("%Y-%m-%d")
+    draw_month_tab(c, month)
+
+    title = event.title
+    day_label  = local_start.strftime("%A %-d %B")
+    time_label = _time_str(event, tz)
+
+    # Header
+    header_y = PAGE_H - MARGIN - 6 * mm
+    draw_text(c, MARGIN, header_y, title, size=13, bold=True,
+              max_width=CONTENT_W - 20 * mm)
+    draw_text(c, MARGIN, header_y - 6 * mm, day_label, size=8, color=C_MID_GREY)
+    draw_text(c, MARGIN + CONTENT_W, header_y, time_label,
+              size=7.5, color=C_MID_GREY, align="right")
+
+    # Back link → weekly page
     c.setFont("Helvetica", 7)
     c.setFillColor(C_ACCENT)
-    back_x = PAGE_W - MARGIN
-    back_y = PAGE_H - MARGIN - 6 * mm
-    c.drawRightString(back_x, back_y, f"< {event.start.strftime('%A')}")
-    c.linkAbsolute("", f"day_{day_key}",
-                   (back_x - 20 * mm, back_y - 2 * mm, back_x, back_y + 4 * mm))
+    back_x = MARGIN + CONTENT_W
+    back_y = header_y - 6 * mm
+    c.drawRightString(back_x, back_y, f"< Week")
+    c.linkAbsolute("", week_bookmark,
+                   (back_x - 15 * mm, back_y - 2 * mm, back_x, back_y + 4 * mm))
 
-    y = content_y
+    draw_rule(c, MARGIN, header_y - 11 * mm, CONTENT_W, color=C_LIGHT_GREY, thickness=0.5)
 
-    # Metadata pills row
-    meta_items = [
-        ("Time", time_label),
-        ("Duration", event.duration_str),
-    ]
-    if event.location:
-        meta_items.append(("Location", event.location))
-    if event.calendar_name:
-        meta_items.append(("Calendar", event.calendar_name))
+    y = header_y - 17 * mm
+
+    # Metadata pills
+    meta = [("Time", time_label), ("Duration", event.duration_str)]
+    if event.location:     meta.append(("Location", event.location))
+    if event.calendar_name: meta.append(("Calendar", event.calendar_name))
 
     pill_x = MARGIN
-    pill_h = 7 * mm
-    pill_padding = 3 * mm
-
-    for label, value in meta_items:
-        label_w = c.stringWidth(label + ": ", "Helvetica-Bold", 7)
-        value_w = c.stringWidth(value, "Helvetica", 7)
-        pill_w = label_w + value_w + 2 * pill_padding
-
-        if pill_x + pill_w > PAGE_W - MARGIN:
+    pill_h = 6.5 * mm
+    for lbl, val in meta:
+        lw = c.stringWidth(lbl + ": ", "Helvetica-Bold", 7)
+        vw = c.stringWidth(val, "Helvetica", 7)
+        pw = lw + vw + 6 * mm
+        if pill_x + pw > MARGIN + CONTENT_W:
             pill_x = MARGIN
             y -= pill_h + 2 * mm
-
-        draw_rect(c, pill_x, y - pill_h, pill_w, pill_h,
+        draw_rect(c, pill_x, y - pill_h, pw, pill_h,
                   fill_color=colors.HexColor("#F5F5F5"),
                   stroke_color=C_LIGHT_GREY, radius=3)
-        draw_text(c, pill_x + pill_padding, y - pill_h + 2 * mm,
-                  f"{label}: ", size=7, bold=True, color=C_DARK_GREY)
-        draw_text(c, pill_x + pill_padding + label_w,
-                  y - pill_h + 2 * mm, value, size=7, color=C_DARK_GREY)
+        draw_text(c, pill_x + 3 * mm, y - pill_h + 1.5 * mm,
+                  f"{lbl}: ", size=7, bold=True, color=C_DARK_GREY)
+        draw_text(c, pill_x + 3 * mm + lw, y - pill_h + 1.5 * mm,
+                  val, size=7, color=C_DARK_GREY)
+        pill_x += pw + 2 * mm
 
-        pill_x += pill_w + 2 * mm
+    y -= pill_h + 5 * mm
 
-    y -= pill_h + 4 * mm
-
-    # Attendees section
+    # Attendees
     if event.attendees:
         draw_rule(c, MARGIN, y, CONTENT_W, color=C_RULE)
         y -= 5 * mm
         draw_text(c, MARGIN, y, "Attendees", size=7.5, bold=True, color=C_DARK_GREY)
         y -= 5 * mm
-
-        response_colors = {
-            "accepted": colors.HexColor("#4CAF50"),
-            "tentative": colors.HexColor("#FF9800"),
-            "declined": colors.HexColor("#F44336"),
-            "unknown": C_MID_GREY,
-        }
-
+        resp_colors = {"accepted": colors.HexColor("#4CAF50"),
+                       "tentative": colors.HexColor("#FF9800"),
+                       "declined":  colors.HexColor("#F44336"),
+                       "unknown":   C_MID_GREY}
         att_x = MARGIN
         for att in event.attendees:
-            dot_color = response_colors.get(att.response, C_MID_GREY)
-            label = att.name or att.email
-            label_w = c.stringWidth(label, "Helvetica", 7.5) + 8 * mm
-
-            if att_x + label_w > PAGE_W - MARGIN:
-                att_x = MARGIN
-                y -= 5 * mm
-
-            # Response dot
-            c.setFillColor(dot_color)
+            lbl = att.name or att.email
+            lw  = c.stringWidth(lbl, "Helvetica", 7.5) + 8 * mm
+            if att_x + lw > MARGIN + CONTENT_W:
+                att_x = MARGIN; y -= 5 * mm
+            c.setFillColor(resp_colors.get(att.response, C_MID_GREY))
             c.circle(att_x + 2 * mm, y + 1.5 * mm, 1.5, fill=1, stroke=0)
-
-            draw_text(c, att_x + 5 * mm, y, label, size=7.5, color=C_DARK_GREY)
-            att_x += label_w + 4 * mm
-
+            draw_text(c, att_x + 5 * mm, y, lbl, size=7.5, color=C_DARK_GREY)
+            att_x += lw + 4 * mm
         y -= 6 * mm
 
-    # Description / agenda
+    # Agenda / description
     if event.description:
         draw_rule(c, MARGIN, y, CONTENT_W, color=C_RULE)
         y -= 5 * mm
         draw_text(c, MARGIN, y, "Agenda", size=7.5, bold=True, color=C_DARK_GREY)
         y -= 5 * mm
-
-        # Word-wrap the description
         words = event.description.split()
-        line = ""
+        line  = ""
         for word in words:
             test = (line + " " + word).strip()
             if c.stringWidth(test, "Helvetica", 7.5) < CONTENT_W:
                 line = test
             else:
-                if y < MARGIN + 30 * mm:
-                    break
+                if y < MARGIN + 30 * mm: break
                 draw_text(c, MARGIN, y, line, size=7.5, color=C_DARK_GREY)
-                y -= 4.5 * mm
-                line = word
+                y -= 4.5 * mm; line = word
         if line and y > MARGIN + 30 * mm:
             draw_text(c, MARGIN, y, line, size=7.5, color=C_DARK_GREY)
             y -= 6 * mm
 
-    # Notes header
+    # Notes section
     draw_rule(c, MARGIN, y, CONTENT_W, color=C_RULE)
     y -= 5 * mm
     draw_text(c, MARGIN, y, "Notes", size=7.5, bold=True, color=C_DARK_GREY)
-    y -= 6 * mm
+    y -= 7 * mm
 
     # Lined writing area
-    line_spacing = 8 * mm
-    while y > MARGIN + line_spacing:
+    while y > MARGIN + 8 * mm:
         draw_rule(c, MARGIN, y, CONTENT_W, color=C_RULE, thickness=0.35)
-        y -= line_spacing
+        y -= 8 * mm
 
 
 # ---------------------------------------------------------------------------
@@ -480,9 +598,10 @@ def build_planner(
     """
     Builds the full linked PDF planner.
 
-    Pass a flat list of CalendarEvent objects (from calendar_manager).
-    The function handles page ordering, internal link registration,
-    and hyperlink wiring automatically.
+    Structure:
+      - One monthly overview page per month in the range
+      - One weekly spread page per ISO week in the range (Mon–Fri columns)
+      - One meeting note page per timed event
     """
     if not start_date:
         start_date = date.today()
@@ -494,61 +613,65 @@ def build_planner(
     except Exception:
         tz = ZoneInfo("UTC")
 
-    # Determine months to cover
+    # Months to cover
     months = []
     cursor = date(start_date.year, start_date.month, 1)
     while cursor <= end_date:
         months.append((cursor.year, cursor.month))
         cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
 
+    # Weeks to cover (each week starts on Monday)
+    first_monday = _week_monday(start_date)
+    last_monday  = _week_monday(end_date)
+    weeks = []
+    w = first_monday
+    while w <= last_monday:
+        weeks.append(w)
+        w += timedelta(days=7)
+
     # Group events
-    events_by_month: dict[tuple, list[CalendarEvent]] = {m: [] for m in months}
-    events_by_day: dict[str, list[CalendarEvent]] = {}
+    events_by_month: dict[tuple, list] = {m: [] for m in months}
+    events_by_day:   dict[str, list]   = {}
     for e in events:
         key = (e.start.year, e.start.month)
         if key in events_by_month:
             events_by_month[key].append(e)
-        day_key = e.start.strftime("%Y-%m-%d")
+        day_key = e.start.astimezone(tz).strftime("%Y-%m-%d")
         events_by_day.setdefault(day_key, []).append(e)
 
-    # Days in range that have events (or are just within range)
-    all_days = []
-    d = start_date
-    while d <= end_date:
-        all_days.append(d)
-        d += timedelta(days=1)
+    # Mapping: day -> which week bookmark it belongs to
+    day_week_map: dict[str, str] = {}   # "YYYY-MM-DD" -> week bookmark key
+    for w in weeks:
+        bm = f"week_{w.isoformat()}"
+        for i in range(5):
+            dk = (w + timedelta(days=i)).strftime("%Y-%m-%d")
+            day_week_map[dk] = bm
 
     # --- Pass 1: assign page numbers ---
-    # Page layout:
-    #   Page 1 = month 1 overview
-    #   Pages 2..N = daily pages for month 1
-    #   Page N+1 = month 2 overview
-    #   etc.
-    #   Then all meeting note pages at the end
-
     page_num = 1
-    month_page_map: dict[str, int] = {}   # "YYYY-MM" -> page number
-    day_page_map: dict[str, int] = {}     # "YYYY-MM-DD" -> page number
-    event_page_map: dict[str, int] = {}   # event.id -> page number
+    month_page_map: dict[str, int] = {}   # "YYYY-MM" -> page num
+    week_page_map:  dict[str, int] = {}   # monday iso -> page num
 
     for year, month in months:
-        month_key = f"{year}-{month:02d}"
-        month_page_map[month_key] = page_num
+        month_page_map[f"{year}-{month:02d}"] = page_num
         page_num += 1
 
-        for d in all_days:
-            if d.year == year and d.month == month:
-                day_key = d.strftime("%Y-%m-%d")
-                day_page_map[day_key] = page_num
-                page_num += 1
+    for w in weeks:
+        week_page_map[w.isoformat()] = page_num
+        page_num += 1
 
-    # Meeting note pages (one per timed event that has a day page)
-    all_timed_events = [
+    # Meeting note pages — one per timed event with a known week
+    all_timed = [
         e for e in events
-        if not e.is_all_day and e.start.strftime("%Y-%m-%d") in day_page_map
+        if not e.is_all_day
+        and e.start.astimezone(tz).strftime("%Y-%m-%d") in day_week_map
     ]
-    for e in sorted(all_timed_events, key=lambda x: x.start):
+    event_page_map: dict[str, int] = {}
+    event_week_map: dict[str, str] = {}   # event.id -> week bookmark key
+    for e in sorted(all_timed, key=lambda x: x.start):
         event_page_map[e.id] = page_num
+        dk = e.start.astimezone(tz).strftime("%Y-%m-%d")
+        event_week_map[e.id] = day_week_map[dk]
         page_num += 1
 
     total_pages = page_num - 1
@@ -556,54 +679,41 @@ def build_planner(
     # --- Pass 2: draw pages ---
     c = canvas.Canvas(output_path, pagesize=A4)
     c.setTitle(title)
-    c.setAuthor("PolarisFolio Clone")
+    c.setAuthor("PolarisFolio")
 
+    # Monthly overview pages
     for year, month in months:
         month_key = f"{year}-{month:02d}"
-
-        # Register bookmark for month page
         c.bookmarkPage(f"month_{year}_{month:02d}")
         c.addOutlineEntry(
-            f"{datetime(year, month, 1).strftime('%B %Y')}",
+            datetime(year, month, 1).strftime("%B %Y"),
             f"month_{year}_{month:02d}", level=0
         )
-
-        # Monthly overview
-        draw_month_page(c, year, month,
-                        events_by_month[(year, month)],
-                        day_page_map)
+        draw_month_page(c, year, month, events_by_month[(year, month)], day_week_map)
         c.showPage()
 
-        # Daily pages
-        for d in all_days:
-            if d.year == year and d.month == month:
-                day_key = d.strftime("%Y-%m-%d")
-                day_events = events_by_day.get(day_key, [])
+    # Weekly spread pages
+    for w in weeks:
+        bm = f"week_{w.isoformat()}"
+        c.bookmarkPage(bm)
+        label = f"Week {w.isocalendar()[1]} · {w.strftime('%-d %b')} – {(w+timedelta(days=4)).strftime('%-d %b')}"
+        c.addOutlineEntry(label, bm, level=1)
 
-                c.bookmarkPage(f"day_{day_key}")
-                c.addOutlineEntry(
-                    d.strftime("%-d %B"),
-                    f"day_{day_key}", level=1
-                )
+        # Collect events for this week's 5 days
+        week_days_events = {}
+        for i in range(5):
+            dk = (w + timedelta(days=i)).strftime("%Y-%m-%d")
+            week_days_events[dk] = events_by_day.get(dk, [])
 
-                draw_day_page(
-                    c, d, day_events,
-                    event_page_map,
-                    month_page_map[month_key],
-                    tz=tz,
-                )
-                c.showPage()
+        draw_week_page(c, w, week_days_events, event_page_map, tz)
+        c.showPage()
 
     # Meeting note pages
-    for e in sorted(all_timed_events, key=lambda x: x.start):
-        day_key = e.start.strftime("%Y-%m-%d")
+    for e in sorted(all_timed, key=lambda x: x.start):
+        week_bm = event_week_map[e.id]
         c.bookmarkPage(f"event_{e.id}")
-        c.addOutlineEntry(
-            f"  {e.title[:40]}",
-            f"event_{e.id}", level=2
-        )
-
-        draw_meeting_page(c, e, day_page_map.get(day_key, 1), tz=tz)
+        c.addOutlineEntry(f"  {e.title[:40]}", f"event_{e.id}", level=2)
+        draw_meeting_page(c, e, week_bm, tz=tz)
         c.showPage()
 
     c.save()
@@ -612,7 +722,7 @@ def build_planner(
 
 
 # ---------------------------------------------------------------------------
-# Quick test with synthetic events
+# Quick test
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -621,73 +731,36 @@ if __name__ == "__main__":
 
     today = date.today()
     start = today
-    end = today + timedelta(days=13)
+    end   = today + timedelta(days=13)
 
-    # Synthetic test events
-    def make_event(day_offset, hour, duration_h, title, location=None,
-                   description=None, attendees=None):
-        d = today + timedelta(days=day_offset)
-        start_dt = datetime(d.year, d.month, d.day, hour, 0, tzinfo=timezone.utc)
-        end_dt = datetime(d.year, d.month, d.day,
-                          hour + duration_h, 0, tzinfo=timezone.utc)
-        return CalendarEvent(
-            id=f"evt_{day_offset}_{hour}",
-            title=title,
-            start=start_dt,
-            end=end_dt,
-            location=location,
-            description=description,
-            attendees=attendees or [],
-            calendar_name="Microsoft 365",
-            source="graph",
-        )
+    def make_event(day_offset, hour, dur, title, loc=None, desc=None, atts=None):
+        d  = today + timedelta(days=day_offset)
+        s  = datetime(d.year, d.month, d.day, hour,     0, tzinfo=timezone.utc)
+        en = datetime(d.year, d.month, d.day, hour+dur, 0, tzinfo=timezone.utc)
+        return CalendarEvent(id=f"evt_{day_offset}_{hour}", title=title,
+                             start=s, end=en, location=loc, description=desc,
+                             attendees=atts or [], calendar_name="AD Calendar", source="ical")
 
     test_events = [
         make_event(0, 9, 1, "Team Standup", "Teams",
-                   "Daily check-in. Topics: sprint progress, blockers.",
-                   [Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted"),
-                    Attendee("Peter Smith", "peter@ad.com.au", "accepted")]),
-        make_event(0, 10, 2, "Azure Development Group - QBR",
-                   "Level 7, 123 Eagle St, Brisbane",
-                   "Quarterly business review. Agenda: roadmap review, M365 licence analysis, Copilot rollout.",
-                   [Attendee("Tom Deakin", "tom@azd.com.au", "accepted"),
-                    Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted"),
-                    Attendee("Genna Boylan", "genna@ad.com.au", "tentative")]),
-        make_event(0, 14, 1, "1:1 with Peter", None,
-                   "Monthly team lead catchup. Topics: utilisation, upcoming leave.",
-                   [Attendee("Peter Smith", "peter@ad.com.au", "accepted")]),
-        make_event(1, 9, 1, "L10 Weekly Meeting", "Boardroom",
-                   "Leadership team weekly. Scorecard review, IDS.",
-                   [Attendee("Aaron Lindner", "aaron@ad.com.au", "accepted"),
-                    Attendee("Morgan Orreal", "morgan@ad.com.au", "accepted"),
-                    Attendee("Myles Dawson", "myles@ad.com.au", "declined")]),
-        make_event(2, 11, 1, "Elementa Markets - Service Review",
-                   "Teams",
-                   "Monthly service delivery review. Billing query follow-up.",
-                   [Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted")]),
-        make_event(3, 9, 2, "Superior Engineering - Onsite Visit",
-                   "Superior Engineering HQ",
-                   "Scheduled onsite. Windows 11 upgrade follow-up, Wasabi backup review.",
-                   [Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted")]),
-        make_event(5, 14, 1, "SDM Sync - Atlantic Digital",
-                   "Boardroom",
-                   "Internal SDM team sync. Utilisation report review.",
-                   [Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted"),
-                    Attendee("Peter Smith", "peter@ad.com.au", "accepted")]),
-        make_event(7, 9, 1, "Team Standup", "Teams", None,
-                   [Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted")]),
-        make_event(7, 11, 2, "Life Fertility Clinic - IT Committee",
-                   "Life Fertility Clinic North Lakes",
-                   "Bi-monthly IT committee. Genie stability update, hardware refresh.",
-                   [Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted")]),
-        make_event(10, 9, 1, "Team Standup", "Teams", None,
-                   [Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted")]),
-        make_event(11, 15, 1, "1:1 with Aaron", None,
-                   "Monthly check-in with service delivery lead.",
-                   [Attendee("Aaron Lindner", "aaron@ad.com.au", "accepted"),
-                    Attendee("Elliot Lawrence", "elliot@ad.com.au", "accepted")]),
+                   atts=[Attendee("Elliot Lawrence", "e@ad.com.au", "accepted")]),
+        make_event(0, 10, 2, "Azure QBR", "Level 7, 123 Eagle St",
+                   atts=[Attendee("Tom Deakin", "tom@azd.com.au", "accepted"),
+                         Attendee("Genna Boylan", "genna@ad.com.au", "tentative")]),
+        make_event(0, 14, 1, "1:1 with Peter",
+                   atts=[Attendee("Peter Smith", "peter@ad.com.au", "accepted")]),
+        make_event(1, 9,  1, "L10 Weekly", "Boardroom"),
+        make_event(2, 11, 1, "Elementa Markets Review", "Teams"),
+        make_event(3, 9,  2, "Superior Engineering Onsite", "Superior HQ"),
+        make_event(4, 9,  1, "Team Standup", "Teams"),
+        make_event(4, 11, 2, "Life Fertility IT Committee", "North Lakes"),
+        make_event(7, 9,  1, "Team Standup", "Teams"),
+        make_event(7, 15, 1, "SDM Sync", "Boardroom"),
+        make_event(10, 9, 1, "Team Standup", "Teams"),
+        make_event(11, 15,1, "1:1 with Aaron"),
     ]
 
-    out = "/home/claude/polarisfolio/test_planner.pdf"
+    out = os.path.expanduser("~/polarisfolio_pdfs/test_weekly.pdf")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     build_planner(test_events, out, start_date=start, end_date=end,
-                  title="PolarisFolio Test Planner")
+                  title="PolarisFolio Weekly Test", timezone_name="Australia/Brisbane")
