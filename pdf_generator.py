@@ -1170,7 +1170,7 @@ def build_planner(
                 c.showPage()
 
     c.save()
-    print(f"PDF saved: {output_path}  ({total_pages} pages)")
+    print(f"PDF saved: {output_path}")
     return output_path
 
 
