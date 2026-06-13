@@ -156,8 +156,9 @@ def circle(c: canvas.Canvas, cx, cy, r, fill, stroke=None, lw=0.5):
 # Right-edge month tab
 # ─────────────────────────────────────────────────────────────────────────────
 
-def draw_tab(c: canvas.Canvas, month: int):
-    """Coloured right-edge tab with rotated month abbreviation."""
+def draw_tab(c: canvas.Canvas, month: int, month_bookmark: str = ""):
+    """Coloured right-edge tab with rotated month abbreviation.
+    If month_bookmark is given the tab becomes a tap target back to that month page."""
     fill = colors.HexColor(MONTH_TAB_COLORS[(month - 1) % 12])
     tab_x = PAGE_W - TAB_W
 
@@ -176,6 +177,10 @@ def draw_tab(c: canvas.Canvas, month: int):
     c.rotate(90)
     c.drawCentredString(0, -2.5, abbr)
     c.restoreState()
+
+    # Tap target — entire tab navigates back to the monthly overview
+    if month_bookmark:
+        c.linkAbsolute("", month_bookmark, (tab_x, 0, PAGE_W, PAGE_H))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -382,7 +387,8 @@ def draw_week_page(c: canvas.Canvas,
                    week_monday: date,
                    days_events: dict,
                    event_page_map: dict,
-                   tz):
+                   tz,
+                   month_bookmark: str = ""):
     """
     5-column Mon–Fri weekly spread with timed event blocks.
     Matches Dayfolio layout: number-only headers, full-width all-day band,
@@ -392,7 +398,7 @@ def draw_week_page(c: canvas.Canvas,
     month       = week_monday.month
     week_num    = week_monday.isocalendar()[1]
 
-    draw_tab(c, month)
+    draw_tab(c, month, month_bookmark=month_bookmark)
 
     # Header
     month_str = week_monday.strftime("%B").upper()
@@ -919,7 +925,8 @@ def build_planner(
             ev_by_day.get((w + timedelta(days=i)).strftime("%Y-%m-%d"), [])
             for i in range(5)
         }
-        draw_week_page(c, w, wk_evts, event_pg, tz)
+        month_bm = f"month_{w.year}_{w.month:02d}"
+        draw_week_page(c, w, wk_evts, event_pg, tz, month_bookmark=month_bm)
         c.showPage()
 
     # Meeting notes
