@@ -208,10 +208,10 @@ def _draw_nav_icon(c: canvas.Canvas, cx: float, cy: float,
 
 
 def draw_nav_buttons(c: canvas.Canvas, active: str,
-                     month_bm: str = "", week_bm: str = ""):
+                     month_bm: str = "", week_bm: str = "", day_bm: str = ""):
     """
     Draw 5 nav icons in the top-right of the page header.
-    active: "year" | "month" | "week"
+    active: "year" | "month" | "week" | "day"
     Icons (left→right): year-grid, month-cal, week-cal, day-cal, menu
     Active icon uses C_ACCENT; others use C_SILVER.
     Tappable icons link to their bookmark; no-bookmark icons are display-only.
@@ -226,7 +226,7 @@ def draw_nav_buttons(c: canvas.Canvas, active: str,
         ("year",  YEAR_BM),
         ("month", month_bm),
         ("week",  week_bm),
-        ("day",   ""),      # no daily pages — always grey, no link
+        ("day",   day_bm),
         ("menu",  ""),
     ]
 
@@ -642,9 +642,17 @@ def draw_week_page(c: canvas.Canvas,
         accent_bar=True,
     )
     week_bm = f"week_{week_monday.isoformat()}"
+    # First timed event in this week that has a detail page → day button target
+    week_timed = sorted(
+        [e for evts in days_events.values() for e in evts
+         if not e.is_all_day and e.id in event_page_map],
+        key=lambda e: e.start,
+    )
+    first_day_bm = f"event_{week_timed[0].id}" if week_timed else ""
     draw_nav_buttons(c, "week",
                      month_bm=month_bookmark,
-                     week_bm=week_bm)
+                     week_bm=week_bm,
+                     day_bm=first_day_bm)
 
     # ── Grid geometry ────────────────────────────────────────────────────────
     TIME_COL_W = 9 * mm
@@ -934,7 +942,7 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
     )
 
     month_bm = f"month_{ls.year}_{ls.month:02d}"
-    draw_nav_buttons(c, "week", month_bm=month_bm, week_bm=week_bookmark)
+    draw_nav_buttons(c, "day", month_bm=month_bm, week_bm=week_bookmark)
 
     y = sep_y - 6 * mm
 
