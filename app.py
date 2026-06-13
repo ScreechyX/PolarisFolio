@@ -43,6 +43,7 @@ from scheduler import scheduler, apply_schedule
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="PolarisFolio")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")
