@@ -45,7 +45,7 @@ class RemarkableUploader:
 
         try:
             result = subprocess.run(
-                ["rmapi", "put", pdf_path, target_folder],
+                ["rmapi", "put", "--force", pdf_path, target_folder],
                 capture_output=True, text=True, timeout=60, env=env,
             )
             if result.returncode == 0:
