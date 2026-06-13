@@ -137,7 +137,11 @@ def _expand_vevent(
         attendees = _parse_attendees(component)
 
         results = []
-        for occurrence_start in rset.between(start_date, end_date, inc=True):
+        for occurrence_start in rset.between(
+            start_date - timedelta(days=1),
+            end_date + timedelta(days=1),
+            inc=True,
+        ):
             if occurrence_start.tzinfo is None:
                 occurrence_start = occurrence_start.replace(tzinfo=timezone.utc)
             occurrence_end = occurrence_start + duration
