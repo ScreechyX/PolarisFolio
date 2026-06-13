@@ -49,18 +49,59 @@ def parse_ical(
     calendar_name: str = "iCal Feed",
 ) -> list[CalendarEvent]:
     """
-    Parses raw ICS bytes and returns CalendarEvent objects
-    within the given date range. Expands RRULE recurring events.
+    Parses raw ICS bytes and returns CalendarEvent objects within the
+    given date range. Expands RRULE recurring events.
+
+    Correctly handles Outlook ICS feeds which publish:
+      - A master VEVENT with RRULE (the recurring series definition)
+      - VEVENTs with RECURRENCE-ID (exception/modified instances)
+      - Plain VEVENTs (non-recurring)
+
+    We expand masters via RRULE and skip RECURRENCE-ID duplicates to
+    avoid double-counting.
     """
     cal = Calendar.from_ical(ical_data)
-    events = []
+
+    masters = {}      # uid -> component (has RRULE)
+    exceptions = {}   # uid -> [recurrence-id datetimes] (modified instances)
+    singles = []      # plain non-recurring VEVENTs
 
     for component in cal.walk():
         if component.name != "VEVENT":
             continue
 
-        expanded = _expand_vevent(component, calendar_name, start_date, end_date)
+        uid = str(component.get("UID", ""))
+        recurrence_id = component.get("RECURRENCE-ID")
+        rrule = component.get("RRULE")
+
+        if recurrence_id:
+            # Modified/cancelled instance — track so we exclude it from RRULE expansion
+            is_all_day = [False]
+            exc_dt = _to_datetime(recurrence_id, is_all_day)
+            if exc_dt:
+                exceptions.setdefault(uid, []).append(exc_dt)
+        elif rrule:
+            masters[uid] = component
+        else:
+            singles.append(component)
+
+    events = []
+
+    # Expand recurring masters
+    for uid, component in masters.items():
+        extra_exdates = exceptions.get(uid, [])
+        expanded = _expand_vevent(component, calendar_name, start_date, end_date,
+                                  extra_exdates=extra_exdates)
         events.extend(expanded)
+
+    # Parse non-recurring singles
+    for component in singles:
+        parsed = _parse_vevent(component, calendar_name)
+        if parsed is None:
+            continue
+        if parsed.end < start_date or parsed.start > end_date:
+            continue
+        events.append(parsed)
 
     events.sort(key=lambda e: e.start)
     return events
@@ -71,6 +112,7 @@ def _expand_vevent(
     calendar_name: str,
     start_date: datetime,
     end_date: datetime,
+    extra_exdates: list = None,
 ) -> list[CalendarEvent]:
     """
     Returns one CalendarEvent per occurrence of this VEVENT within the
@@ -127,6 +169,10 @@ def _expand_vevent(
                     elif dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     rset.exdate(dt)
+
+        # Add RECURRENCE-ID exception dates from modified instances
+        for exc_dt in (extra_exdates or []):
+            rset.exdate(exc_dt)
 
         uid = str(component.get("UID", ""))
         title = str(component.get("SUMMARY", "(No title)"))
