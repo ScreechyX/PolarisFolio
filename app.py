@@ -139,8 +139,7 @@ async def dashboard(request: Request):
         except Exception:
             pass
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "dashboard.html", {
         "ms_connected": ms_ok,
         "feed_count": len([f for f in feeds if f["enabled"]]),
         "uploads": uploads,
@@ -235,8 +234,7 @@ async def calendars_page(request: Request, success: str = None, error: str = Non
     ms_user = await get_setting("ms_user_name", "")
     feeds = await get_ical_feeds()
 
-    return templates.TemplateResponse("calendars.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "calendars.html", {
         "ms_connected": ms_ok,
         "ms_user": ms_user,
         "feeds": feeds,
@@ -282,8 +280,7 @@ async def generate_page(request: Request, success: str = None, error: str = None
     today = date.today()
     default_end = today + timedelta(days=14)
 
-    return templates.TemplateResponse("generate.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "generate.html", {
         "ms_connected": ms_ok,
         "feeds": feeds,
         "has_sources": has_sources,
@@ -396,8 +393,7 @@ async def _run_generation(
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(request: Request, generating: str = None):
     uploads = await get_uploads(limit=50)
-    return templates.TemplateResponse("history.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "history.html", {
         "uploads": uploads,
         "generating": generating == "1",
         "active": "history",
@@ -426,8 +422,7 @@ async def settings_page(request: Request, success: str = None, error: str = None
     settings = await get_all_settings()
     ms_ok = await ms_connected()
 
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "settings.html", {
         "settings": settings,
         "ms_connected": ms_ok,
         "success": success,
