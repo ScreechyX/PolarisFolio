@@ -1,0 +1,482 @@
+"""
+PolarisFolio Web - FastAPI application.
+
+Routes:
+  GET  /                  - dashboard
+  GET  /auth/microsoft    - start Microsoft OAuth
+  GET  /auth/callback     - OAuth callback
+  GET  /auth/disconnect   - remove Microsoft token
+  GET  /calendars         - manage calendar sources
+  POST /calendars/ical    - add ICS feed
+  POST /calendars/ical/{id}/toggle - toggle feed on/off
+  POST /calendars/ical/{id}/delete - remove feed
+  GET  /generate          - generate planner form
+  POST /generate          - run generation + upload
+  GET  /history           - past planners
+  GET  /download/{id}     - download a generated PDF
+  GET  /settings          - app settings
+  POST /settings          - save settings
+"""
+
+import os
+import uuid
+import asyncio
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+from fastapi import FastAPI, Request, Form, BackgroundTasks
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+import msal
+
+from database import (
+    init_db, get_setting, set_setting, get_all_settings,
+    get_ical_feeds, add_ical_feed, toggle_ical_feed, delete_ical_feed,
+    add_upload, get_uploads,
+)
+
+# ---------------------------------------------------------------------------
+# App setup
+# ---------------------------------------------------------------------------
+
+app = FastAPI(title="PolarisFolio")
+templates = Jinja2Templates(directory="templates")
+
+PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")
+os.makedirs(PDF_DIR, exist_ok=True)
+
+MS_SCOPES = ["Calendars.Read", "User.Read"]
+MS_AUTHORITY = "https://login.microsoftonline.com/common"
+TOKEN_CACHE_FILE = os.path.expanduser("~/.polarisfolio_msal_cache.json")
+
+
+@app.on_event("startup")
+async def startup():
+    await init_db()
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def _load_msal_cache():
+    cache = msal.SerializableTokenCache()
+    if os.path.exists(TOKEN_CACHE_FILE):
+        with open(TOKEN_CACHE_FILE) as f:
+            cache.deserialize(f.read())
+    return cache
+
+
+def _save_msal_cache(cache: msal.SerializableTokenCache):
+    if cache.has_state_changed:
+        with open(TOKEN_CACHE_FILE, "w") as f:
+            f.write(cache.serialize())
+
+
+def _get_msal_app(client_id: str, cache=None):
+    return msal.ConfidentialClientApplication(
+        client_id,
+        authority=MS_AUTHORITY,
+        client_credential=None,
+        token_cache=cache,
+    )
+
+
+async def get_ms_token() -> str | None:
+    """Returns a valid MS access token, or None if not authenticated."""
+    client_id = await get_setting("ms_client_id")
+    if not client_id:
+        return None
+
+    cache = _load_msal_cache()
+    app = msal.PublicClientApplication(
+        client_id, authority=MS_AUTHORITY, token_cache=cache
+    )
+    accounts = app.get_accounts()
+    if not accounts:
+        return None
+
+    result = app.acquire_token_silent(MS_SCOPES, account=accounts[0])
+    _save_msal_cache(cache)
+
+    if result and "access_token" in result:
+        return result["access_token"]
+    return None
+
+
+async def ms_connected() -> bool:
+    return await get_ms_token() is not None
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    ms_ok = await ms_connected()
+    feeds = await get_ical_feeds()
+    uploads = await get_uploads(limit=5)
+
+    # Upcoming events preview (next 24h) if MS connected
+    upcoming = []
+    if ms_ok:
+        try:
+            from graph_connector import get_events
+            token = await get_ms_token()
+            now = datetime.now(timezone.utc)
+            events = get_events(token, now, now + timedelta(hours=24))
+            upcoming = events[:5]
+        except Exception:
+            pass
+
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "ms_connected": ms_ok,
+        "feed_count": len([f for f in feeds if f["enabled"]]),
+        "uploads": uploads,
+        "upcoming": upcoming,
+        "active": "dashboard",
+    })
+
+
+# ---------------------------------------------------------------------------
+# Microsoft OAuth
+# ---------------------------------------------------------------------------
+
+@app.get("/auth/microsoft")
+async def auth_microsoft(request: Request):
+    client_id = await get_setting("ms_client_id")
+    if not client_id:
+        return RedirectResponse("/settings?error=no_client_id")
+
+    redirect_uri = str(request.base_url) + "auth/callback"
+    cache = _load_msal_cache()
+    ms_app = msal.PublicClientApplication(
+        client_id, authority=MS_AUTHORITY, token_cache=cache
+    )
+
+    flow = ms_app.initiate_auth_code_flow(
+        scopes=MS_SCOPES,
+        redirect_uri=redirect_uri,
+    )
+    _save_msal_cache(cache)
+
+    # Store flow state in a simple file (single-user, so this is fine)
+    import json
+    with open(os.path.expanduser("~/.polarisfolio_auth_flow.json"), "w") as f:
+        json.dump(flow, f)
+
+    return RedirectResponse(flow["auth_uri"])
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request, code: str = None, error: str = None):
+    if error:
+        return RedirectResponse(f"/settings?error={error}")
+
+    import json
+    flow_file = os.path.expanduser("~/.polarisfolio_auth_flow.json")
+    if not os.path.exists(flow_file):
+        return RedirectResponse("/settings?error=flow_missing")
+
+    with open(flow_file) as f:
+        flow = json.load(f)
+
+    client_id = await get_setting("ms_client_id")
+    cache = _load_msal_cache()
+    ms_app = msal.PublicClientApplication(
+        client_id, authority=MS_AUTHORITY, token_cache=cache
+    )
+
+    redirect_uri = str(request.base_url) + "auth/callback"
+    result = ms_app.acquire_token_by_auth_code_flow(
+        flow,
+        dict(request.query_params),
+        redirect_uri=redirect_uri,
+    )
+    _save_msal_cache(cache)
+    os.unlink(flow_file)
+
+    if "access_token" in result:
+        # Save display name
+        name = result.get("id_token_claims", {}).get("name", "")
+        if name:
+            await set_setting("ms_user_name", name)
+        return RedirectResponse("/settings?success=microsoft_connected")
+
+    return RedirectResponse(f"/settings?error=auth_failed")
+
+
+@app.get("/auth/disconnect")
+async def auth_disconnect():
+    if os.path.exists(TOKEN_CACHE_FILE):
+        os.unlink(TOKEN_CACHE_FILE)
+    await set_setting("ms_user_name", "")
+    return RedirectResponse("/settings?success=disconnected")
+
+
+# ---------------------------------------------------------------------------
+# Calendars
+# ---------------------------------------------------------------------------
+
+@app.get("/calendars", response_class=HTMLResponse)
+async def calendars_page(request: Request, success: str = None, error: str = None):
+    ms_ok = await ms_connected()
+    ms_user = await get_setting("ms_user_name", "")
+    feeds = await get_ical_feeds()
+
+    return templates.TemplateResponse("calendars.html", {
+        "request": request,
+        "ms_connected": ms_ok,
+        "ms_user": ms_user,
+        "feeds": feeds,
+        "success": success,
+        "error": error,
+        "active": "calendars",
+    })
+
+
+@app.post("/calendars/ical")
+async def add_ical(
+    name: str = Form(...),
+    url: str = Form(...),
+):
+    if not url.startswith("http"):
+        return RedirectResponse("/calendars?error=invalid_url", status_code=303)
+    await add_ical_feed(name.strip(), url.strip())
+    return RedirectResponse("/calendars?success=feed_added", status_code=303)
+
+
+@app.post("/calendars/ical/{feed_id}/toggle")
+async def toggle_feed(feed_id: int, enabled: int = Form(0)):
+    await toggle_ical_feed(feed_id, bool(enabled))
+    return RedirectResponse("/calendars", status_code=303)
+
+
+@app.post("/calendars/ical/{feed_id}/delete")
+async def delete_feed(feed_id: int):
+    await delete_ical_feed(feed_id)
+    return RedirectResponse("/calendars?success=feed_removed", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Generate
+# ---------------------------------------------------------------------------
+
+@app.get("/generate", response_class=HTMLResponse)
+async def generate_page(request: Request, success: str = None, error: str = None):
+    ms_ok = await ms_connected()
+    feeds = await get_ical_feeds(enabled_only=True)
+    has_sources = ms_ok or len(feeds) > 0
+
+    today = date.today()
+    default_end = today + timedelta(days=14)
+
+    return templates.TemplateResponse("generate.html", {
+        "request": request,
+        "ms_connected": ms_ok,
+        "feeds": feeds,
+        "has_sources": has_sources,
+        "default_start": today.isoformat(),
+        "default_end": default_end.isoformat(),
+        "success": success,
+        "error": error,
+        "active": "generate",
+    })
+
+
+@app.post("/generate")
+async def run_generate(
+    background_tasks: BackgroundTasks,
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    upload_to_rm: str = Form("off"),
+    rm_folder: str = Form("/PolarisFolio"),
+):
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except ValueError:
+        return RedirectResponse("/generate?error=invalid_dates", status_code=303)
+
+    if end < start:
+        return RedirectResponse("/generate?error=end_before_start", status_code=303)
+
+    # Run generation in background, redirect to history
+    background_tasks.add_task(
+        _run_generation,
+        start, end,
+        upload_to_rm == "on",
+        rm_folder,
+    )
+
+    return RedirectResponse("/history?generating=1", status_code=303)
+
+
+async def _run_generation(
+    start: date,
+    end: date,
+    upload: bool,
+    rm_folder: str,
+):
+    """Background task: pull calendar, generate PDF, optionally upload."""
+    from calendar_manager import CalendarManager
+    from pdf_generator import build_planner
+    from rm_uploader import RemarkableUploader
+
+    manager = CalendarManager()
+
+    # Microsoft Graph
+    token = await get_ms_token()
+    if token:
+        manager.add_graph_source(token, name="Microsoft 365")
+
+    # ICS feeds
+    feeds = await get_ical_feeds(enabled_only=True)
+    for f in feeds:
+        manager.add_ical_source(url=f["url"], name=f["name"])
+
+    if not manager._sources:
+        return
+
+    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+    events = manager.get_events(start_dt, end_dt)
+
+    # Generate PDF
+    display_name = f"PolarisFolio {start.strftime('%b %Y')}"
+    filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}.pdf"
+    pdf_path = os.path.join(PDF_DIR, filename)
+
+    build_planner(
+        events=events,
+        output_path=pdf_path,
+        start_date=start,
+        end_date=end,
+        title=display_name,
+    )
+
+    # Upload
+    uploaded = False
+    if upload and os.path.exists(pdf_path):
+        try:
+            uploader = RemarkableUploader()
+            uploaded = uploader.upload(display_name, pdf_path, folder=rm_folder)
+        except Exception as e:
+            print(f"Upload error: {e}")
+
+    # Save to history
+    await add_upload(
+        display_name=display_name,
+        start_date=start.isoformat(),
+        end_date=end.isoformat(),
+        event_count=len(events),
+        pdf_path=pdf_path,
+        uploaded_to_rm=uploaded,
+    )
+
+
+# ---------------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------------
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_page(request: Request, generating: str = None):
+    uploads = await get_uploads(limit=50)
+    return templates.TemplateResponse("history.html", {
+        "request": request,
+        "uploads": uploads,
+        "generating": generating == "1",
+        "active": "history",
+    })
+
+
+@app.get("/download/{upload_id}")
+async def download_pdf(upload_id: int):
+    uploads = await get_uploads(limit=200)
+    match = next((u for u in uploads if u["id"] == upload_id), None)
+    if not match or not match["pdf_path"] or not os.path.exists(match["pdf_path"]):
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    return FileResponse(
+        match["pdf_path"],
+        media_type="application/pdf",
+        filename=os.path.basename(match["pdf_path"]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, success: str = None, error: str = None):
+    settings = await get_all_settings()
+    ms_ok = await ms_connected()
+
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "settings": settings,
+        "ms_connected": ms_ok,
+        "success": success,
+        "error": error,
+        "active": "settings",
+    })
+
+
+@app.post("/settings")
+async def save_settings(
+    ms_client_id: str = Form(""),
+    rm_token: str = Form(""),
+    rm_folder: str = Form("/PolarisFolio"),
+):
+    if ms_client_id:
+        await set_setting("ms_client_id", ms_client_id.strip())
+    if rm_token:
+        # Save RM device token
+        token_file = os.path.expanduser("~/.polarisfolio_rm_token")
+        with open(token_file, "w") as f:
+            f.write(rm_token.strip())
+        os.chmod(token_file, 0o600)
+    await set_setting("rm_folder", rm_folder.strip() or "/PolarisFolio")
+
+    return RedirectResponse("/settings?success=saved", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# API - event preview (for generate page)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/events/count")
+async def event_count(start: str, end: str):
+    """Returns event count for a date range - used by the generate form."""
+    try:
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+    except ValueError:
+        return JSONResponse({"count": 0})
+
+    from calendar_manager import CalendarManager
+    manager = CalendarManager()
+
+    token = await get_ms_token()
+    if token:
+        manager.add_graph_source(token)
+
+    feeds = await get_ical_feeds(enabled_only=True)
+    for f in feeds:
+        manager.add_ical_source(url=f["url"], name=f["name"])
+
+    if not manager._sources:
+        return JSONResponse({"count": 0, "error": "no_sources"})
+
+    start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+    try:
+        events = manager.get_events(start_dt, end_dt)
+        return JSONResponse({"count": len(events)})
+    except Exception as e:
+        return JSONResponse({"count": 0, "error": str(e)})

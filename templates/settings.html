@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Settings — PolarisFolio{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">Settings</div>
+  <div class="page-subtitle">App configuration</div>
+</div>
+
+<div class="page-body" style="max-width: 580px;">
+
+  {% if success == 'saved' %}
+  <div class="alert alert-success">Settings saved.</div>
+  {% elif success == 'microsoft_connected' %}
+  <div class="alert alert-success">Microsoft 365 connected.</div>
+  {% elif success == 'disconnected' %}
+  <div class="alert alert-success">Microsoft 365 disconnected.</div>
+  {% elif error == 'no_client_id' %}
+  <div class="alert alert-error">Add a Microsoft app client ID before connecting.</div>
+  {% elif error == 'auth_failed' %}
+  <div class="alert alert-error">Microsoft authentication failed. Check your client ID and try again.</div>
+  {% elif error %}
+  <div class="alert alert-error">Something went wrong: {{ error }}</div>
+  {% endif %}
+
+  <form method="POST" action="/settings">
+
+    <!-- Microsoft 365 -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-title">Microsoft 365</div>
+
+      <div class="form-group">
+        <label>Azure App Client ID</label>
+        <input type="text" name="ms_client_id"
+          value="{{ settings.get('ms_client_id', '') }}"
+          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          style="font-family: var(--mono); font-size: 13px;">
+        <div class="form-hint">
+          From portal.azure.com → App registrations. Requires Calendars.Read delegated permission.
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 10px; align-items: center;">
+        {% if ms_connected %}
+        <span class="badge badge-green"><span class="dot"></span> Connected</span>
+        <a href="/auth/disconnect" class="btn btn-secondary btn-sm">Disconnect</a>
+        {% else %}
+        <span class="badge badge-grey">Not connected</span>
+        <a href="/auth/microsoft" class="btn btn-primary btn-sm">Connect with Microsoft</a>
+        {% endif %}
+      </div>
+
+      <div class="divider"></div>
+
+      <div style="font-size: 12.5px; color: var(--ink-3); line-height: 1.8;">
+        <strong style="color: var(--ink-2);">Setup steps:</strong><br>
+        1. Go to <span class="mono">portal.azure.com</span> → App registrations → New registration<br>
+        2. Name anything, accounts: "Any org + personal Microsoft accounts"<br>
+        3. API permissions → Microsoft Graph → Delegated → <span class="mono">Calendars.Read</span><br>
+        4. Copy the Application (client) ID and paste above<br>
+        5. Save, then click "Connect with Microsoft"
+      </div>
+    </div>
+
+    <!-- reMarkable -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-title">reMarkable</div>
+
+      <div class="form-group">
+        <label>Device token (REST API fallback)</label>
+        <input type="password" name="rm_token"
+          placeholder="Paste token from setup command"
+          style="font-family: var(--mono); font-size: 13px;">
+        <div class="form-hint">
+          Get a one-time code from my.remarkable.com/device/desktop/connect,
+          then run <span class="mono">python rm_uploader.py setup &lt;code&gt;</span>
+          and paste the token here. Leave blank if using rmapi CLI.
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 0;">
+        <label>Default folder on device</label>
+        <input type="text" name="rm_folder"
+          value="{{ settings.get('rm_folder', '/PolarisFolio') }}"
+          placeholder="/PolarisFolio"
+          style="font-family: var(--mono); font-size: 13px; max-width: 200px;">
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save settings</button>
+
+  </form>
+
+</div>
+{% endblock %}

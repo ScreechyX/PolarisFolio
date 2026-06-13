@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Calendars — PolarisFolio{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">Calendars</div>
+  <div class="page-subtitle">Manage your calendar sources</div>
+</div>
+
+<div class="page-body">
+
+  {% if success == 'feed_added' %}
+  <div class="alert alert-success">ICS feed added.</div>
+  {% elif success == 'feed_removed' %}
+  <div class="alert alert-success">Feed removed.</div>
+  {% elif error == 'invalid_url' %}
+  <div class="alert alert-error">That doesn't look like a valid URL.</div>
+  {% endif %}
+
+  <!-- Microsoft 365 -->
+  <div class="card" style="margin-bottom: 16px;">
+    <div class="card-title">Microsoft 365</div>
+    <div class="status-strip" style="margin-bottom: 0;">
+      <div class="status-strip-left">
+        <div class="status-icon" style="background: #EEF0FB; font-size: 18px;">🪟</div>
+        <div>
+          <div class="status-name">Outlook / Microsoft 365</div>
+          <div class="status-detail">
+            {% if ms_connected %}
+            Connected{% if ms_user %} as {{ ms_user }}{% endif %} &middot; full attendee + RSVP data
+            {% else %}
+            OAuth &middot; requires client ID in Settings
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        {% if ms_connected %}
+        <span class="badge badge-green"><span class="dot"></span> Connected</span>
+        <a href="/auth/disconnect" class="btn btn-secondary btn-sm">Disconnect</a>
+        {% else %}
+        <span class="badge badge-grey">Not connected</span>
+        <a href="/auth/microsoft" class="btn btn-primary btn-sm">Connect</a>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if not ms_connected %}
+    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule);">
+      <div style="font-size: 12.5px; color: var(--ink-3); line-height: 1.7;">
+        To connect Microsoft 365, first add your Azure app client ID in
+        <a href="/settings" style="color: var(--accent);">Settings</a>, then click Connect above.
+        This gives you full calendar access including attendee names and RSVP status.
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ICS Feeds -->
+  <div class="card">
+    <div class="card-title">ICS Feeds</div>
+
+    {% if feeds %}
+    <table style="margin-bottom: 20px;">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>URL</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for feed in feeds %}
+        <tr>
+          <td style="font-weight: 500; color: var(--ink);">{{ feed.name }}</td>
+          <td class="mono" style="font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            {{ feed.url }}
+          </td>
+          <td>
+            {% if feed.enabled %}
+            <span class="badge badge-green"><span class="dot"></span> Active</span>
+            {% else %}
+            <span class="badge badge-grey">Paused</span>
+            {% endif %}
+          </td>
+          <td style="text-align: right;">
+            <form method="POST" action="/calendars/ical/{{ feed.id }}/toggle" style="display:inline;">
+              <input type="hidden" name="enabled" value="{{ 0 if feed.enabled else 1 }}">
+              <button type="submit" class="btn btn-secondary btn-sm">
+                {{ 'Pause' if feed.enabled else 'Enable' }}
+              </button>
+            </form>
+            <form method="POST" action="/calendars/ical/{{ feed.id }}/delete" style="display:inline; margin-left: 6px;"
+                  onsubmit="return confirm('Remove this feed?')">
+              <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty" style="padding: 28px 0 20px;">
+      <div class="empty-icon">📡</div>
+      <div class="empty-title">No ICS feeds yet</div>
+      <div class="empty-body">Add your Outlook ICS URL below, or use Microsoft OAuth above.</div>
+    </div>
+    {% endif %}
+
+    <div class="divider"></div>
+
+    <div style="font-size: 13px; font-weight: 600; margin-bottom: 14px; color: var(--ink-2);">Add ICS feed</div>
+
+    <form method="POST" action="/calendars/ical">
+      <div class="grid-2">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label>Calendar name</label>
+          <input type="text" name="name" placeholder="Work Calendar" required>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label>ICS URL</label>
+          <input type="url" name="url" placeholder="https://outlook.office365.com/owa/calendar/..." required>
+        </div>
+      </div>
+      <div class="form-hint" style="margin-top: 8px; margin-bottom: 14px;">
+        In Outlook web: Settings → Calendar → Shared calendars → Publish a calendar → copy ICS link.
+        Your M365 admin may need to enable calendar publishing first.
+      </div>
+      <button type="submit" class="btn btn-primary">Add feed</button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

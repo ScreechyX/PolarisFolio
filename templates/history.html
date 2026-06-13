@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}History — PolarisFolio{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">History</div>
+  <div class="page-subtitle">Previously generated planners</div>
+</div>
+
+<div class="page-body">
+
+  {% if generating %}
+  <div class="alert alert-info">
+    <span class="spinner"></span>
+    Generating your planner now. This usually takes 10–20 seconds. Refresh to check progress.
+  </div>
+  {% endif %}
+
+  {% if uploads %}
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Planner</th>
+          <th>Date range</th>
+          <th>Events</th>
+          <th>Generated</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for upload in uploads %}
+        <tr>
+          <td style="font-weight: 500; color: var(--ink);">{{ upload.display_name }}</td>
+          <td class="mono" style="font-size: 12.5px;">
+            {{ upload.start_date }} → {{ upload.end_date }}
+          </td>
+          <td class="mono" style="font-size: 12.5px;">{{ upload.event_count }}</td>
+          <td class="mono" style="font-size: 12px; color: var(--ink-3);">
+            {{ upload.created_at[:16].replace('T', ' ') }}
+          </td>
+          <td>
+            {% if upload.uploaded_to_rm %}
+            <span class="badge badge-blue">on device</span>
+            {% else %}
+            <span class="badge badge-grey">local only</span>
+            {% endif %}
+          </td>
+          <td style="text-align: right;">
+            <a href="/download/{{ upload.id }}" class="btn btn-secondary btn-sm">Download PDF</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% else %}
+  <div class="card">
+    <div class="empty">
+      <div class="empty-icon">📄</div>
+      <div class="empty-title">No planners yet</div>
+      <div class="empty-body">
+        <a href="/generate" style="color: var(--accent);">Generate your first planner</a>
+        to see it here.
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+{% if generating %}
+<script>
+  // Auto-refresh while generating
+  setTimeout(() => location.reload(), 8000);
+</script>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — PolarisFolio{% endblock %}
+
+{% block head %}
+<style>
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .stat-card {
+    background: #fff;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 20px 24px;
+  }
+
+  .stat-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--ink-3);
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--ink);
+    font-family: var(--mono);
+    letter-spacing: -1px;
+  }
+
+  .stat-sub {
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-top: 4px;
+  }
+
+  .next-event-banner {
+    background: var(--ink);
+    color: #fff;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .next-event-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #888;
+    margin-bottom: 5px;
+    font-family: var(--mono);
+  }
+
+  .next-event-title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+
+  .next-event-meta {
+    font-size: 12.5px;
+    color: #aaa;
+    margin-top: 4px;
+    font-family: var(--mono);
+  }
+
+  .next-event-countdown {
+    text-align: right;
+  }
+
+  .countdown-value {
+    font-size: 32px;
+    font-weight: 600;
+    font-family: var(--mono);
+    color: var(--accent);
+    letter-spacing: -1px;
+  }
+
+  .countdown-label {
+    font-size: 11px;
+    color: #666;
+    font-family: var(--mono);
+  }
+
+  .event-list { list-style: none; }
+
+  .event-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .event-item:last-child { border-bottom: none; }
+
+  .event-time {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    width: 72px;
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+
+  .event-title {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .event-meta {
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-top: 2px;
+    font-family: var(--mono);
+  }
+
+  .quick-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">Dashboard</div>
+  <div class="page-subtitle">{{ now }}</div>
+</div>
+
+<div class="page-body">
+
+  {% if upcoming %}
+  <div class="next-event-banner">
+    <div>
+      <div class="next-event-label">Next up</div>
+      <div class="next-event-title">{{ upcoming[0].title }}</div>
+      <div class="next-event-meta">{{ upcoming[0].time_str }}{% if upcoming[0].location %} &middot; {{ upcoming[0].location }}{% endif %}</div>
+    </div>
+    <div class="next-event-countdown">
+      <div class="countdown-value" id="countdown">--</div>
+      <div class="countdown-label">mins away</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Calendar Sources</div>
+      <div class="stat-value">{{ feed_count + (1 if ms_connected else 0) }}</div>
+      <div class="stat-sub">
+        {% if ms_connected %}Microsoft 365{% endif %}
+        {% if ms_connected and feed_count %} + {% endif %}
+        {% if feed_count %}{{ feed_count }} ICS feed{{ 's' if feed_count != 1 }}{% endif %}
+        {% if not ms_connected and not feed_count %}None connected{% endif %}
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">Today's Events</div>
+      <div class="stat-value">{{ upcoming | length }}</div>
+      <div class="stat-sub">next 24 hours</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">Planners Generated</div>
+      <div class="stat-value">{{ uploads | length }}</div>
+      <div class="stat-sub">
+        {% if uploads %}last {{ uploads[0].created_at[:10] }}{% else %}none yet{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="gap: 20px; align-items: start;">
+
+    <!-- Left col: upcoming + quick actions -->
+    <div>
+      {% if upcoming %}
+      <div class="card">
+        <div class="card-title">Today</div>
+        <ul class="event-list">
+          {% for event in upcoming %}
+          <li class="event-item">
+            <div class="event-time">{{ event.time_str.split(' - ')[0] }}</div>
+            <div>
+              <div class="event-title">{{ event.title }}</div>
+              <div class="event-meta">
+                {{ event.duration_str }}
+                {% if event.location %} &middot; {{ event.location }}{% endif %}
+                {% if event.attendees %} &middot; {{ event.attendees | length }} people{% endif %}
+              </div>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% else %}
+      <div class="card">
+        <div class="card-title">Today</div>
+        {% if not ms_connected and feed_count == 0 %}
+        <div class="empty">
+          <div class="empty-icon">📅</div>
+          <div class="empty-title">No calendars connected</div>
+          <div class="empty-body">Connect Microsoft 365 or add an ICS feed to see your events here.</div>
+        </div>
+        {% else %}
+        <div class="empty">
+          <div class="empty-icon">✓</div>
+          <div class="empty-title">Nothing in the next 24 hours</div>
+          <div class="empty-body">Clear schedule ahead.</div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="card" style="margin-top: 16px;">
+        <div class="card-title">Quick Actions</div>
+        <div class="quick-actions">
+          <a href="/generate" class="btn btn-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Generate planner
+          </a>
+          <a href="/calendars" class="btn btn-secondary">Manage calendars</a>
+          {% if uploads %}
+          <a href="/download/{{ uploads[0].id }}" class="btn btn-secondary">Download last PDF</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Right col: status + recent -->
+    <div>
+      <div class="card">
+        <div class="card-title">Connections</div>
+        <div class="status-strip">
+          <div class="status-strip-left">
+            <div class="status-icon" style="background: #EEF0FB;">🪟</div>
+            <div>
+              <div class="status-name">Microsoft 365</div>
+              <div class="status-detail">Graph API / OAuth</div>
+            </div>
+          </div>
+          {% if ms_connected %}
+          <span class="badge badge-green"><span class="dot"></span> Connected</span>
+          {% else %}
+          <a href="/settings" class="badge badge-grey">Set up</a>
+          {% endif %}
+        </div>
+
+        <div class="status-strip">
+          <div class="status-strip-left">
+            <div class="status-icon" style="background: #F3F0FF;">📡</div>
+            <div>
+              <div class="status-name">ICS Feeds</div>
+              <div class="status-detail">{{ feed_count }} active</div>
+            </div>
+          </div>
+          {% if feed_count %}
+          <span class="badge badge-green"><span class="dot"></span> Active</span>
+          {% else %}
+          <a href="/calendars" class="badge badge-grey">Add feed</a>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if uploads %}
+      <div class="card" style="margin-top: 16px;">
+        <div class="card-title">Recent Planners</div>
+        {% for upload in uploads[:4] %}
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--rule);">
+          <div>
+            <div style="font-size: 13.5px; font-weight: 500;">{{ upload.display_name }}</div>
+            <div style="font-size: 12px; color: var(--ink-3); font-family: var(--mono);">
+              {{ upload.start_date }} → {{ upload.end_date }} &middot; {{ upload.event_count }} events
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            {% if upload.uploaded_to_rm %}
+            <span class="badge badge-blue">on device</span>
+            {% endif %}
+            <a href="/download/{{ upload.id }}" class="btn btn-secondary btn-sm">PDF</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // Live countdown to next event
+  {% if upcoming %}
+  const nextStart = new Date("{{ upcoming[0].start.isoformat() }}");
+  function updateCountdown() {
+    const diff = Math.floor((nextStart - new Date()) / 60000);
+    const el = document.getElementById('countdown');
+    if (!el) return;
+    if (diff <= 0) { el.textContent = 'now'; return; }
+    if (diff > 60) {
+      const h = Math.floor(diff / 60);
+      el.textContent = h + 'h ' + (diff % 60) + 'm';
+    } else {
+      el.textContent = diff;
+    }
+  }
+  updateCountdown();
+  setInterval(updateCountdown, 30000);
+  {% endif %}
+
+  // Set today's date in subtitle
+  document.querySelector('.page-subtitle').textContent =
+    new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+</script>
+{% endblock %}

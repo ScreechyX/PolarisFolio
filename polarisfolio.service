@@ -1,0 +1,15 @@
+[Unit]
+Description=PolarisFolio Web
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/polarisfolio_web
+ExecStart=/home/ubuntu/polarisfolio_web/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=5
+Environment="POLARISFOLIO_DB=/home/ubuntu/.polarisfolio_web.db"
+
+[Install]
+WantedBy=multi-user.target
