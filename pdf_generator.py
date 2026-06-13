@@ -42,7 +42,7 @@ C_INK       = colors.HexColor("#1C1C1E")   # near-black body text
 C_INK_2     = colors.HexColor("#3C3C43")   # secondary labels
 C_GREY      = colors.HexColor("#8A8A8E")   # tertiary / metadata
 C_SILVER    = colors.HexColor("#C7C7CC")   # rules, faint labels
-C_GHOST     = colors.HexColor("#EBEBF0")   # lightest rule / cell border
+C_GHOST     = colors.HexColor("#CCCCCC")   # lightest rule / cell border (bumped for e-ink)
 C_WHITE     = colors.white
 
 # Accent (indigo)
@@ -407,10 +407,10 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
         for di, d in enumerate(_MINI_DOW):
             dx = cx0 + di * cell_sz + cell_sz / 2
             col_d = C_GREY if di >= 5 else C_INK_2
-            txt(c, dx, dow_y, d, size=4.5, col=col_d, align="center")
+            txt(c, dx, dow_y, d, size=6, col=col_d, align="center")
 
         # Thin rule under DOW
-        hrule(c, cx0, dow_y - 1 * mm, cell_w, col=C_GHOST, lw=0.3)
+        hrule(c, cx0, dow_y - 1 * mm, cell_w, col=C_GHOST, lw=0.5)
 
         # Date cells
         first   = date(year, m, 1)
@@ -432,11 +432,11 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
             if is_td:
                 circle(c, dx, dy + 1.5 * mm, 2.8 * mm,
                        fill=C_INK)
-                txt(c, dx, dy, str(day_num), size=5, bold=True,
+                txt(c, dx, dy, str(day_num), size=6.5, bold=True,
                     col=C_WHITE, align="center")
             else:
                 num_col = C_GREY if is_wknd else C_INK_2
-                txt(c, dx, dy, str(day_num), size=5,
+                txt(c, dx, dy, str(day_num), size=6.5,
                     col=num_col, align="center")
 
             # Tap → week page
@@ -502,7 +502,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
     dow_y  = grid_top - DOW_ROW_H
     # "Wk" label over the gutter
     txt(c, MARGIN, dow_y + 2 * mm, "WK",
-        size=5.5, bold=True, col=C_SILVER)
+        size=7, bold=True, col=C_SILVER)
 
     for col, label in enumerate(_DOW):
         cx = MARGIN + WEEK_COL_W + col * WKDAY_W
@@ -513,7 +513,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                         WKDAY_W, body_h,
                         fill=C_WKND)
         txt(c, cx + WKDAY_W / 2, dow_y + 1.8 * mm, label,
-            size=6, bold=True,
+            size=7.5, bold=True,
             col=C_GREY if is_wknd else C_INK_2,
             align="center")
 
@@ -531,10 +531,10 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
             sample_day = next(d for d in week if d)
             wk_num = date(year, month, sample_day).isocalendar()[1]
             txt(c, MARGIN + 1 * mm, row_y_bot + cell_h - 4 * mm,
-                str(wk_num), size=5.5, col=C_SILVER)
+                str(wk_num), size=7, col=C_SILVER)
 
         # Horizontal row divider
-        hrule(c, MARGIN, row_y_bot, CONTENT_W, col=C_GHOST, lw=0.3)
+        hrule(c, MARGIN, row_y_bot, CONTENT_W, col=C_GHOST, lw=0.5)
 
         for col, day_num in enumerate(week):
             if day_num == 0:
@@ -579,7 +579,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                 filled_rect(c, pill_x, pill_y - pill_h,
                             pill_w, pill_h, fill=ec, r=1.5)
                 txt(c, pill_x + 2 * mm, pill_y - pill_h + 1.3 * mm,
-                    evt.title, size=5, bold=True, col=C_WHITE,
+                    evt.title, size=6.5, bold=True, col=C_WHITE,
                     max_w=pill_w - 3 * mm)
                 pill_y -= pill_h + pill_gap
 
@@ -591,11 +591,11 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
         # Vertical column separators (draw once per row, over the content)
         for col in range(1, 7):
             vx = MARGIN + WEEK_COL_W + col * WKDAY_W
-            vrule(c, vx, row_y_bot, cell_h, col=C_GHOST, lw=0.3)
+            vrule(c, vx, row_y_bot, cell_h, col=C_GHOST, lw=0.5)
 
     # Outer grid borders
-    hrule(c, MARGIN, grid_bot, CONTENT_W, col=C_GHOST, lw=0.3)
-    vrule(c, MARGIN + WEEK_COL_W, grid_bot, body_h, col=C_GHOST, lw=0.3)
+    hrule(c, MARGIN, grid_bot, CONTENT_W, col=C_GHOST, lw=0.5)
+    vrule(c, MARGIN + WEEK_COL_W, grid_bot, body_h, col=C_GHOST, lw=0.5)
     vrule(c, MARGIN + WEEK_COL_W + 5 * WKDAY_W, grid_bot,
           body_h, col=C_SILVER, lw=0.5)   # weekday/weekend divider
 
@@ -723,8 +723,8 @@ def draw_week_page(c: canvas.Canvas,
         filled_rect(c, MARGIN + TIME_COL_W, bar_bot,
                     CONTENT_W - TIME_COL_W, ad_bar_h,
                     fill=_event_color(ade.title), r=1.5)
-        txt(c, MARGIN + TIME_COL_W + 3 * mm, bar_bot + 1 * mm,
-            ade.title, size=5, bold=True, col=C_WHITE,
+        txt(c, MARGIN + TIME_COL_W + 3 * mm, bar_bot + 1.5 * mm,
+            ade.title, size=7, bold=True, col=C_WHITE,
             max_w=CONTENT_W - TIME_COL_W - 6 * mm)
 
     # ── Time grid ────────────────────────────────────────────────────────────
@@ -734,18 +734,21 @@ def draw_week_page(c: canvas.Canvas,
 
         # Hour label — digit only, very faint, right-aligned into gutter
         if i < n_hours:
-            txt(c, MARGIN + TIME_COL_W - 1.5 * mm, y - 3,
-                str(hour), size=5.5, col=C_SILVER, align="right")
+            txt(c, MARGIN + TIME_COL_W - 1.5 * mm, y - 3.5,
+                str(hour), size=7, col=C_GREY, align="right")
 
         # Hour rule
         hrule(c, MARGIN + TIME_COL_W, y, CONTENT_W - TIME_COL_W,
-              col=C_GHOST, lw=0.35)
+              col=C_GHOST, lw=0.5)
 
-        # 30-min half rule (even lighter)
+        # 30-min half rule (dashed, lighter)
         if i < n_hours:
-            hrule(c, MARGIN + TIME_COL_W, y - slot_h / 2,
-                  CONTENT_W - TIME_COL_W,
-                  col=colors.HexColor("#F4F4F6"), lw=0.2)
+            c.setStrokeColor(colors.HexColor("#BBBBBB"))
+            c.setLineWidth(0.3)
+            c.setDash([2, 4])
+            c.line(MARGIN + TIME_COL_W, y - slot_h / 2,
+                   MARGIN + TIME_COL_W + CONTENT_W - TIME_COL_W, y - slot_h / 2)
+            c.setDash([])
 
     # ── Timed event blocks ───────────────────────────────────────────────────
     for di, day in enumerate(days):
@@ -783,14 +786,14 @@ def draw_week_page(c: canvas.Canvas,
                 ec = _event_color(evt.title)
                 filled_rect(c, lx, bb, lw, bh, fill=ec, r=2)
 
-                if bh > 5 * mm:
-                    txt(c, lx + 2 * mm, bt - 4 * mm,
-                        evt.title, size=5.5, bold=True, col=C_WHITE,
+                if bh > 6 * mm:
+                    txt(c, lx + 2 * mm, bt - 5 * mm,
+                        evt.title, size=7, bold=True, col=C_WHITE,
                         max_w=lw - 3 * mm)
-                if bh > 10 * mm:
+                if bh > 12 * mm:
                     t_str = f"{ls.strftime('%H:%M')}–{le.strftime('%H:%M')}"
-                    txt(c, lx + 2 * mm, bt - 9 * mm,
-                        t_str, size=4.5, col=C_WHITE, max_w=lw - 3 * mm)
+                    txt(c, lx + 2 * mm, bt - 11 * mm,
+                        t_str, size=6, col=C_WHITE, max_w=lw - 3 * mm)
 
                 if evt.id in event_page_map:
                     c.linkAbsolute("", f"event_{evt.id}",
@@ -827,17 +830,17 @@ def _draw_bottom_sections(c: canvas.Canvas,
     circ_r   = 3.2 * mm              # priority circle radius
 
     # ── Boundary rules ────────────────────────────────────────────────────────
-    hrule(c, x, top_y,  width, col=C_SILVER, lw=0.5)   # top edge
-    hrule(c, x, split_y, width, col=C_SILVER, lw=0.4)  # row divider
+    hrule(c, x, top_y,  width, col=C_SILVER, lw=0.6)   # top edge
+    hrule(c, x, split_y, width, col=C_SILVER, lw=0.5)  # row divider
 
     # ── Vertical dividers ─────────────────────────────────────────────────────
-    vrule(c, PRIO_X,        split_y, top_h,    col=C_GHOST, lw=0.4)  # FOCUS | PRIO
-    vrule(c, x + width / 2, bot,     split_y - bot, col=C_GHOST, lw=0.4)  # TODO | NOTES
+    vrule(c, PRIO_X,        split_y, top_h,    col=C_GHOST, lw=0.5)  # FOCUS | PRIO
+    vrule(c, x + width / 2, bot,     split_y - bot, col=C_GHOST, lw=0.5)  # TODO | NOTES
 
     # ── FOCUS — rotated vertical label, ruled lines ───────────────────────────
     # "FOCUS" rotated 90° reading bottom→top, centred vertically in the zone
     c.saveState()
-    c.setFont("Helvetica-Bold", 6)
+    c.setFont("Helvetica-Bold", 7.5)
     c.setFillColor(C_GREY)
     c.translate(x + 4.5 * mm, (top_y + split_y) / 2)
     c.rotate(90)
@@ -847,12 +850,12 @@ def _draw_bottom_sections(c: canvas.Canvas,
     # Ruled lines in the FOCUS writing area
     ly = top_y - 6 * mm
     while ly > split_y + 2 * mm:
-        hrule(c, x + 9 * mm, ly, FOCUS_W - 11 * mm, col=C_GHOST, lw=0.3)
+        hrule(c, x + 9 * mm, ly, FOCUS_W - 11 * mm, col=C_GHOST, lw=0.5)
         ly -= line_h
 
     # ── PRIORITIES — numbered filled circles + writing lines ──────────────────
     txt(c, PRIO_X + 3 * mm, top_y - 4.5 * mm, "PRIORITIES",
-        size=5.5, bold=True, col=C_GREY)
+        size=7, bold=True, col=C_GREY)
 
     circ_cx = PRIO_X + 6 * mm
     cy      = top_y - 11 * mm
@@ -862,24 +865,24 @@ def _draw_bottom_sections(c: canvas.Canvas,
         # Filled circle: first two solid accent, third outlined
         if n <= 2:
             circle(c, circ_cx, cy, circ_r, fill=C_ACCENT)
-            c.setFont("Helvetica-Bold", 6)
+            c.setFont("Helvetica-Bold", 7)
             c.setFillColor(C_WHITE)
         else:
             circle(c, circ_cx, cy, circ_r,
                    fill=C_GHOST, stroke=C_SILVER, lw=0.5)
-            c.setFont("Helvetica-Bold", 6)
+            c.setFont("Helvetica-Bold", 7)
             c.setFillColor(C_SILVER)
-        c.drawCentredString(circ_cx, cy - 2, str(n))
+        c.drawCentredString(circ_cx, cy - 2.5, str(n))
         # Ruled line beside circle
         line_x = circ_cx + circ_r + 2 * mm
         hrule(c, line_x, cy, PRIO_W - circ_r * 2 - 10 * mm,
-              col=C_GHOST, lw=0.3)
+              col=C_GHOST, lw=0.5)
         cy -= circ_r * 2 + 2.5 * mm
 
     # ── HABIT CHART — 5-col mini grid below priorities ────────────────────────
     if cy > split_y + 8 * mm:
         txt(c, PRIO_X + 3 * mm, cy + 1.5 * mm, "HABIT CHART",
-            size=5, bold=True, col=C_SILVER)
+            size=6.5, bold=True, col=C_SILVER)
         cy -= 5 * mm
         cell_sz  = 4 * mm
         cell_gap = 0.8 * mm
@@ -889,25 +892,25 @@ def _draw_bottom_sections(c: canvas.Canvas,
             for ci in range(5):
                 cx2 = grid_x + ci * (cell_sz + cell_gap)
                 c.setStrokeColor(C_GHOST)
-                c.setLineWidth(0.3)
+                c.setLineWidth(0.5)
                 c.rect(cx2, row_y - cell_sz, cell_sz, cell_sz, fill=0, stroke=1)
             row_y -= cell_sz + cell_gap
 
     # ── TO DO LIST (bottom-left) ──────────────────────────────────────────────
     txt(c, x + 2 * mm, split_y - 4.5 * mm, "TO DO LIST",
-        size=5.5, bold=True, col=C_GREY)
+        size=7, bold=True, col=C_GREY)
     ly = split_y - 10 * mm
     while ly > bot + 2 * mm:
-        hrule(c, x + 2 * mm, ly, width / 2 - 4 * mm, col=C_GHOST, lw=0.3)
+        hrule(c, x + 2 * mm, ly, width / 2 - 4 * mm, col=C_GHOST, lw=0.5)
         ly -= line_h
 
     # ── NOTES (bottom-right) ──────────────────────────────────────────────────
     txt(c, x + width / 2 + 2 * mm, split_y - 4.5 * mm, "NOTES",
-        size=5.5, bold=True, col=C_GREY)
+        size=7, bold=True, col=C_GREY)
     ly = split_y - 10 * mm
     while ly > bot + 2 * mm:
         hrule(c, x + width / 2 + 2 * mm, ly, width / 2 - 4 * mm,
-              col=C_GHOST, lw=0.3)
+              col=C_GHOST, lw=0.5)
         ly -= line_h
 
 
@@ -962,7 +965,7 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
         filled_rect(c, pill_x, pill_y, pill_w, pill_h,
                     fill=C_ACCENT, r=3)
         txt(c, pill_x + pill_w / 2, pill_y + 1.8 * mm,
-            "TODAY", size=5.5, bold=True, col=C_WHITE, align="center")
+            "TODAY", size=7, bold=True, col=C_WHITE, align="center")
 
     day_bm = f"day_{day_date.isoformat()}"
     draw_nav_buttons(c, "day",
@@ -979,7 +982,7 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
     grid_top = sep_y - 2 * mm
     grid_bot = MARGIN
 
-    vrule(c, plan_x, grid_bot, grid_top - grid_bot, col=C_GHOST, lw=0.5)
+    vrule(c, plan_x, grid_bot, grid_top - grid_bot, col=C_SILVER, lw=0.6)
 
     # ── Time grid (left panel) ────────────────────────────────────────────────
     TIME_LABEL_W = 8 * mm
@@ -999,16 +1002,16 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
             if hour > 12:
                 label = f"{hour - 12}PM"
             txt(c, grid_x - 1.5 * mm, y - 3.5,
-                label, size=5, col=C_SILVER, align="right")
+                label, size=7, col=C_GREY, align="right")
 
         # Hour rule (solid)
-        hrule(c, grid_x, y, grid_w, col=C_GHOST, lw=0.35)
+        hrule(c, grid_x, y, grid_w, col=C_GHOST, lw=0.5)
 
         # Half-hour rule (dashed / lighter)
         if i < n_hours:
-            c.setStrokeColor(colors.HexColor("#EFEFEF"))
-            c.setLineWidth(0.2)
-            c.setDash([2, 3])
+            c.setStrokeColor(colors.HexColor("#BBBBBB"))
+            c.setLineWidth(0.3)
+            c.setDash([2, 4])
             c.line(grid_x, y - slot_h / 2, grid_x + grid_w, y - slot_h / 2)
             c.setDash([])
 
@@ -1043,14 +1046,14 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
             ec = _event_color(evt.title)
             filled_rect(c, lx, bb, lw, bh, fill=ec, r=2)
 
-            if bh > 5 * mm:
-                txt(c, lx + 1.5 * mm, bt - 4 * mm,
-                    evt.title, size=5, bold=True, col=C_WHITE,
+            if bh > 6 * mm:
+                txt(c, lx + 1.5 * mm, bt - 5 * mm,
+                    evt.title, size=7, bold=True, col=C_WHITE,
                     max_w=lw - 3 * mm)
-            if bh > 9 * mm:
+            if bh > 12 * mm:
                 t_str = f"{ls.strftime('%H:%M')}–{le.strftime('%H:%M')}"
-                txt(c, lx + 1.5 * mm, bt - 8 * mm,
-                    t_str, size=4, col=C_WHITE, max_w=lw - 3 * mm)
+                txt(c, lx + 1.5 * mm, bt - 11 * mm,
+                    t_str, size=6, col=C_WHITE, max_w=lw - 3 * mm)
 
             if evt.id in event_page_map:
                 c.linkAbsolute("", f"event_{evt.id}", (lx, bb, lx + lw, bt))
@@ -1073,17 +1076,17 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
             qline2 = (qline2 + " " + w).strip()
 
     txt(c, plan_x + pad, py - 5.5 * mm,
-        qline1, size=6, italic=True, col=C_INK_2)
+        qline1, size=7.5, italic=True, col=C_INK_2)
     if qline2:
-        txt(c, plan_x + pad, py - 10 * mm,
-            qline2, size=6, italic=True, col=C_INK_2)
-    txt(c, plan_x + pad, py - (15 if qline2 else 13) * mm,
-        f"— {author.upper()}", size=4.5, bold=True, col=C_ACCENT)
+        txt(c, plan_x + pad, py - 11 * mm,
+            qline2, size=7.5, italic=True, col=C_INK_2)
+    txt(c, plan_x + pad, py - (17 if qline2 else 14) * mm,
+        f"— {author.upper()}", size=6, bold=True, col=C_ACCENT)
 
     py -= (20 if qline2 else 17) * mm
 
     # Horizontal rule
-    hrule(c, plan_x, py, PLAN_W, col=C_GHOST, lw=0.4)
+    hrule(c, plan_x, py, PLAN_W, col=C_GHOST, lw=0.5)
     py -= 1 * mm
 
     # FOCUS box (salmon/pink background)
@@ -1094,7 +1097,7 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
 
     # "FOCUS" label rotated vertically inside box
     c.saveState()
-    c.setFont("Helvetica-Bold", 6)
+    c.setFont("Helvetica-Bold", 7.5)
     c.setFillColor(colors.HexColor("#C06080"))
     c.translate(plan_x + pad + 5 * mm, py - FOCUS_H / 2)
     c.rotate(90)
@@ -1102,59 +1105,59 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
     c.restoreState()
 
     # Ruled lines inside FOCUS box
-    fy = py - 6 * mm
+    fy = py - 7 * mm
     while fy > py - FOCUS_H + 3 * mm:
         hrule(c, plan_x + pad + 10 * mm, fy,
               PLAN_W - 2 * pad - 11 * mm,
-              col=colors.HexColor("#E8B4C0"), lw=0.3)
+              col=colors.HexColor("#E8B4C0"), lw=0.5)
         fy -= line_h
 
     py -= FOCUS_H + 4 * mm
 
     # PRIORITIES
-    hrule(c, plan_x, py, PLAN_W, col=C_GHOST, lw=0.4)
+    hrule(c, plan_x, py, PLAN_W, col=C_GHOST, lw=0.5)
     txt(c, plan_x + pad, py - 4 * mm, "PRIORITIES",
-        size=5.5, bold=True, col=C_GREY)
+        size=7, bold=True, col=C_GREY)
     py -= 9 * mm
-    circ_r = 3 * mm
+    circ_r = 3.5 * mm
     for n in range(1, 4):
         cx2 = plan_x + pad + circ_r
         if n <= 2:
             circle(c, cx2, py, circ_r, fill=C_ACCENT)
-            c.setFont("Helvetica-Bold", 6); c.setFillColor(C_WHITE)
+            c.setFont("Helvetica-Bold", 7.5); c.setFillColor(C_WHITE)
         else:
-            circle(c, cx2, py, circ_r, fill=C_GHOST, stroke=C_SILVER, lw=0.4)
-            c.setFont("Helvetica-Bold", 6); c.setFillColor(C_SILVER)
-        c.drawCentredString(cx2, py - 2, str(n))
+            circle(c, cx2, py, circ_r, fill=C_GHOST, stroke=C_SILVER, lw=0.5)
+            c.setFont("Helvetica-Bold", 7.5); c.setFillColor(C_SILVER)
+        c.drawCentredString(cx2, py - 2.5, str(n))
         hrule(c, cx2 + circ_r + 2 * mm, py,
               PLAN_W - pad - circ_r * 2 - 6 * mm,
-              col=C_GHOST, lw=0.3)
-        py -= circ_r * 2 + 2 * mm
+              col=C_GHOST, lw=0.5)
+        py -= circ_r * 2 + 2.5 * mm
 
     py -= 3 * mm
 
     # TO DO LIST — bold separator, checkboxes, ruled lines
-    hrule(c, plan_x, py, PLAN_W, col=C_INK, lw=0.8)
-    txt(c, plan_x + pad, py - 4 * mm, "TO DO LIST",
-        size=5.5, bold=True, col=C_GREY)
-    py -= 9 * mm
-    todo_r = 2.2 * mm
+    hrule(c, plan_x, py, PLAN_W, col=C_INK, lw=1.0)
+    txt(c, plan_x + pad, py - 4.5 * mm, "TO DO LIST",
+        size=7, bold=True, col=C_GREY)
+    py -= 10 * mm
+    todo_r = 2.8 * mm
     while py > grid_bot + 30 * mm:
         circle(c, plan_x + pad + todo_r, py, todo_r,
-               fill=C_WHITE, stroke=C_SILVER, lw=0.4)
+               fill=C_WHITE, stroke=C_SILVER, lw=0.5)
         hrule(c, plan_x + pad + todo_r * 2 + 2 * mm, py,
               PLAN_W - pad - todo_r * 2 - 5 * mm,
-              col=C_GHOST, lw=0.3)
+              col=C_GHOST, lw=0.5)
         py -= line_h
 
     # NOTES — bold separator, ruled lines
-    hrule(c, plan_x, py, PLAN_W, col=C_INK, lw=0.8)
-    txt(c, plan_x + pad, py - 4 * mm, "NOTES",
-        size=5.5, bold=True, col=C_GREY)
-    py -= 9 * mm
+    hrule(c, plan_x, py, PLAN_W, col=C_INK, lw=1.0)
+    txt(c, plan_x + pad, py - 4.5 * mm, "NOTES",
+        size=7, bold=True, col=C_GREY)
+    py -= 10 * mm
     while py > grid_bot + 2 * mm:
         hrule(c, plan_x + pad, py,
-              PLAN_W - 2 * pad, col=C_GHOST, lw=0.3)
+              PLAN_W - 2 * pad, col=C_GHOST, lw=0.5)
         py -= line_h
 
 
