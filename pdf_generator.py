@@ -329,7 +329,7 @@ def draw_page_header(c: canvas.Canvas,
 _MINI_DOW = ["S", "M", "T", "W", "T", "F", "S"]
 
 def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
-                   active_months: set = None):
+                   active_months: set = None, tz=timezone.utc):
     """
     Full-year calendar: 3-col × 4-row mini-month grid.
     All 12 month tabs are shown as equal-height segments on the right edge.
@@ -337,7 +337,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
     Each date cell links to its weekly spread.
     Today is circled; the current month name gets a colour pill badge.
     """
-    today = date.today()
+    today = datetime.now(tz).date()
 
     # ── All-12-months right-edge tabs ─────────────────────────────────────────
     tab_x   = PAGE_W - TAB_W
@@ -652,7 +652,7 @@ def draw_week_page(c: canvas.Canvas,
     BOTTOM_H   = 56 * mm          # FOCUS + PRIORITIES + TO DO LIST + NOTES
     DAY_HDR_H  = 14 * mm          # day-number header band height
 
-    today = date.today()
+    today = datetime.now(tz).date()
     days  = [week_monday + timedelta(days=i) for i in range(5)]
 
     # Pre-collect unique all-day events across the week
@@ -1133,7 +1133,7 @@ def build_planner(
     c.bookmarkPage(YEAR_BM)
     c.addOutlineEntry(str(year_val), YEAR_BM, level=0)
     active_months_set_int = {month for (yr, month) in months if yr == year_val}
-    draw_year_page(c, year_val, day_week_map, active_months=active_months_set_int)
+    draw_year_page(c, year_val, day_week_map, active_months=active_months_set_int, tz=tz)
     c.showPage()
 
     for year, month in months:
@@ -1181,7 +1181,7 @@ def build_planner(
 if __name__ == "__main__":
     from models import CalendarEvent, Attendee
 
-    today = date.today()
+    today = datetime.now(tz).date()
 
     def _evt(day_off, hour, dur_h, title, loc=None, desc=None, atts=None):
         d  = today + timedelta(days=day_off)
