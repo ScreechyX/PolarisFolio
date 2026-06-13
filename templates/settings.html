@@ -66,51 +66,22 @@
     <div class="card" style="margin-bottom: 16px;">
       <div class="card-title">reMarkable</div>
 
-      <div class="form-group">
-        <label>reMarkable email address</label>
-        <input type="email" name="rm_email"
-          value="{{ settings.get('rm_email', '') }}"
-          placeholder="yourname@remarkable.com"
-          style="font-family: var(--mono); font-size: 13px;">
-        <div class="form-hint">
-          Find this on your device: Settings → Send to reMarkable.
-        </div>
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 16px;">
+        {% if rmapi_ok %}
+        <span class="badge badge-green"><span class="dot"></span> rmapi connected</span>
+        {% else %}
+        <span class="badge badge-grey">rmapi not found</span>
+        {% endif %}
       </div>
 
-      <div class="form-group">
-        <label>SMTP host</label>
-        <input type="text" name="smtp_host"
-          value="{{ settings.get('smtp_host', '') }}"
-          placeholder="smtp.gmail.com"
-          style="font-family: var(--mono); font-size: 13px; max-width: 280px;">
-      </div>
-
-      <div class="form-group">
-        <label>SMTP port</label>
-        <input type="number" name="smtp_port"
-          value="{{ settings.get('smtp_port', '587') }}"
-          placeholder="587"
-          style="font-family: var(--mono); font-size: 13px; max-width: 100px;">
-        <div class="form-hint">587 (STARTTLS) is standard for Gmail and most providers.</div>
-      </div>
-
-      <div class="form-group">
-        <label>SMTP username</label>
-        <input type="text" name="smtp_user"
-          value="{{ settings.get('smtp_user', '') }}"
-          placeholder="you@gmail.com"
-          style="font-family: var(--mono); font-size: 13px; max-width: 280px;">
-      </div>
-
-      <div class="form-group">
-        <label>SMTP password / app password</label>
-        <input type="password" name="smtp_pass"
-          placeholder="Leave blank to keep existing"
-          style="font-family: var(--mono); font-size: 13px; max-width: 280px;">
-        <div class="form-hint">
-          For Gmail: use an App Password (requires 2FA).
-          <a href="https://myaccount.google.com/apppasswords" target="_blank">Generate one here.</a>
-        </div>
+      <div style="font-size: 12.5px; color: var(--ink-3); line-height: 1.8; margin-bottom: 16px;">
+        <strong style="color: var(--ink-2);">Setup:</strong><br>
+        1. Download <span class="mono">rmapi-linux-amd64</span> from
+           <span class="mono">github.com/ddvk/rmapi/releases</span>
+           and place it at <span class="mono">/usr/local/bin/rmapi</span><br>
+        2. Run <span class="mono">su - polarisfolio</span> then <span class="mono">rmapi</span>
+           and authenticate with your reMarkable account<br>
+        3. Refresh this page to confirm the connection
       </div>
 
       <div class="form-group" style="margin-bottom: 0;">
@@ -119,7 +90,6 @@
           value="{{ settings.get('rm_folder', '/PolarisFolio') }}"
           placeholder="/PolarisFolio"
           style="font-family: var(--mono); font-size: 13px; max-width: 200px;">
-        <div class="form-hint">Not used for email delivery — documents land in My files.</div>
       </div>
     </div>
 

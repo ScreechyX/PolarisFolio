@@ -19,6 +19,7 @@ Routes:
 """
 
 import os
+import shutil
 import uuid
 import asyncio
 from datetime import date, datetime, timedelta, timezone
@@ -432,6 +433,7 @@ async def settings_page(request: Request, success: str = None, error: str = None
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings,
         "ms_connected": ms_ok,
+        "rmapi_ok": shutil.which("rmapi") is not None,
         "success": success,
         "error": error,
         "active": "settings",
