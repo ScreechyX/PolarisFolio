@@ -57,56 +57,48 @@
     .sidebar.collapsed { width: 52px; }
 
     .sidebar-logo {
-      padding: 20px 14px 16px;
+      padding: 16px 14px;
       border-bottom: 1px solid var(--sidebar-2);
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      min-width: 220px;
+      gap: 12px;
+      /* No min-width — must shrink with the sidebar */
     }
-
-    .sidebar-logo .wordmark {
-      font-size: 16px;
-      font-weight: 600;
-      color: #fff;
-      letter-spacing: -0.3px;
-      white-space: nowrap;
-      transition: opacity 0.15s;
-    }
-
-    .sidebar-logo .tagline {
-      font-size: 11px;
-      color: #666;
-      margin-top: 2px;
-      font-family: var(--mono);
-      white-space: nowrap;
-      transition: opacity 0.15s;
-    }
-
-    .sidebar.collapsed .sidebar-logo .wordmark,
-    .sidebar.collapsed .sidebar-logo .tagline { opacity: 0; }
 
     .collapse-btn {
       background: none;
       border: none;
       cursor: pointer;
-      color: #555;
-      padding: 4px;
+      color: #666;
+      padding: 5px;
       border-radius: 4px;
-      flex-shrink: 0;
+      flex-shrink: 0;           /* always visible — it's the leftmost element */
       display: flex;
       align-items: center;
       transition: color 0.15s, background 0.15s;
-      margin-left: auto;
     }
     .collapse-btn:hover { color: #ccc; background: var(--sidebar-2); }
     .collapse-btn svg { width: 16px; height: 16px; display: block; }
 
+    .sidebar-wordmark { overflow: hidden; white-space: nowrap; }
+
+    .sidebar-wordmark .wordmark {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      letter-spacing: -0.3px;
+    }
+
+    .sidebar-wordmark .tagline {
+      font-size: 11px;
+      color: #666;
+      margin-top: 2px;
+      font-family: var(--mono);
+    }
+
     .sidebar-nav {
       padding: 12px 8px;
       flex: 1;
-      min-width: 220px;
     }
 
     .nav-item {
@@ -136,7 +128,7 @@
       color: #555;
       font-family: var(--mono);
       white-space: nowrap;
-      min-width: 220px;
+      overflow: hidden;
     }
 
     /* Main content */
@@ -400,10 +392,6 @@
 
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-logo">
-    <div>
-      <div class="wordmark">PolarisFolio</div>
-      <div class="tagline">paper-first planner</div>
-    </div>
     <button class="collapse-btn" id="collapseBtn" title="Toggle sidebar">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="3" y1="6" x2="21" y2="6"/>
@@ -411,6 +399,10 @@
         <line x1="3" y1="18" x2="21" y2="18"/>
       </svg>
     </button>
+    <div class="sidebar-wordmark">
+      <div class="wordmark">PolarisFolio</div>
+      <div class="tagline">paper-first planner</div>
+    </div>
   </div>
 
   <div class="sidebar-nav">
