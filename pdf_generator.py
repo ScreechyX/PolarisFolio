@@ -235,9 +235,7 @@ def draw_nav_buttons(c: canvas.Canvas, active: str,
 
     for i, (name, bm) in enumerate(icons):
         cx = start_x + i * (SZ + GAP) + SZ / 2
-        col = (colors.HexColor(C_ACCENT)
-               if name == active
-               else colors.HexColor(C_SILVER))
+        col = C_ACCENT if name == active else C_SILVER
         _draw_nav_icon(c, cx, cy, SZ, name, col)
         if bm:
             lx = cx - SZ / 2
@@ -361,7 +359,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict):
     c.drawString(MARGIN + 6, top - 11, year_str)
     year_w = c.stringWidth(year_str, "Helvetica-Bold", 15)
     txt(c, MARGIN + 6 + year_w + 4, top - 11, "CALENDAR",
-        size=15, bold=False, col=colors.HexColor(C_INK_2))
+        size=15, bold=False, col=C_INK_2)
 
     sep_y = top - 26
     hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
@@ -431,7 +429,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict):
 
             if is_td:
                 circle(c, dx, dy + 1.5 * mm, 2.8 * mm,
-                       fill=colors.HexColor(C_INK))
+                       fill=C_INK)
                 txt(c, dx, dy, str(day_num), size=5, bold=True,
                     col=C_WHITE, align="center")
             else:
