@@ -6,7 +6,8 @@
   <title>{% block title %}PolarisFolio{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Cormorant+Garamond:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -24,8 +25,9 @@
       --warn:      #C9933A;
       --danger:    #C0392B;
       --radius:    6px;
-      --font:      'Inter', system-ui, sans-serif;
-      --mono:      'DM Mono', monospace;
+      --font:      'Outfit', system-ui, sans-serif;
+      --mono:      'JetBrains Mono', monospace;
+      --serif:     'Cormorant Garamond', Georgia, serif;
     }
 
     html, body { height: 100%; }
@@ -83,17 +85,20 @@
     .sidebar-wordmark { overflow: hidden; white-space: nowrap; }
 
     .sidebar-wordmark .wordmark {
-      font-size: 16px;
+      font-family: var(--serif);
+      font-size: 18px;
       font-weight: 600;
       color: #F0E6CC;
-      letter-spacing: -0.3px;
+      letter-spacing: 0.5px;
     }
 
     .sidebar-wordmark .tagline {
-      font-size: 11px;
+      font-size: 10px;
       color: #4A5270;
-      margin-top: 2px;
+      margin-top: 1px;
       font-family: var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     .sidebar-nav {
@@ -155,9 +160,10 @@
     }
 
     .page-title {
-      font-size: 22px;
+      font-family: var(--serif);
+      font-size: 26px;
       font-weight: 600;
-      letter-spacing: -0.4px;
+      letter-spacing: 0.2px;
       color: var(--ink);
     }
 
