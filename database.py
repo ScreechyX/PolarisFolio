@@ -132,6 +132,15 @@ async def add_upload(
         return cur.lastrowid
 
 
+async def update_upload_rm_status(upload_id: int, uploaded: bool):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE uploads SET uploaded_to_rm = ? WHERE id = ?",
+            (1 if uploaded else 0, upload_id)
+        )
+        await db.commit()
+
+
 async def clear_uploads(delete_files: bool = False):
     async with aiosqlite.connect(DB_PATH) as db:
         if delete_files:

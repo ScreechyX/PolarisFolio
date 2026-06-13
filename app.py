@@ -34,7 +34,7 @@ import msal
 from database import (
     init_db, get_setting, set_setting, get_all_settings,
     get_ical_feeds, add_ical_feed, toggle_ical_feed, delete_ical_feed,
-    add_upload, get_uploads, clear_uploads,
+    add_upload, get_uploads, clear_uploads, update_upload_rm_status,
 )
 from scheduler import scheduler, apply_schedule
 
@@ -372,31 +372,25 @@ async def _run_generation(
         timezone_name=tz_name,
     )
 
-    # Upload
-    uploaded = False
-    if upload and os.path.exists(pdf_path):
-        try:
-            rm_settings = {
-                "rm_email":   await get_setting("rm_email", ""),
-                "smtp_host":  await get_setting("smtp_host", ""),
-                "smtp_port":  await get_setting("smtp_port", "587"),
-                "smtp_user":  await get_setting("smtp_user", ""),
-                "smtp_pass":  await get_setting("smtp_pass", ""),
-            }
-            uploader = RemarkableUploader(rm_settings)
-            uploaded = uploader.upload(display_name, pdf_path, folder=rm_folder)
-        except Exception as e:
-            print(f"Upload error: {e}")
-
-    # Save to history
-    await add_upload(
+    # Save to history immediately so the UI stops spinning
+    upload_id = await add_upload(
         display_name=display_name,
         start_date=start.isoformat(),
         end_date=end.isoformat(),
         event_count=len(events),
         pdf_path=pdf_path,
-        uploaded_to_rm=uploaded,
+        uploaded_to_rm=False,
     )
+
+    # Upload (may take a while — history entry already visible)
+    if upload and os.path.exists(pdf_path):
+        try:
+            uploader = RemarkableUploader({"rm_folder": rm_folder})
+            uploaded = uploader.upload(display_name, pdf_path, folder=rm_folder)
+            if uploaded:
+                await update_upload_rm_status(upload_id, True)
+        except Exception as e:
+            print(f"Upload error: {e}")
 
 
 # ---------------------------------------------------------------------------
