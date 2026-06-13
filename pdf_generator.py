@@ -708,6 +708,10 @@ def draw_week_page(c: canvas.Canvas,
         circle(c, num_cx + nw / 2 + 2.5 * mm,
                hdr_top - 6 * mm, 1.8 * mm, fill=dot_col)
 
+        # Tap the day number header to jump to that day's page
+        c.linkAbsolute("", f"day_{day.isoformat()}",
+                       (cx, hdr_sep_y, cx + DAY_COL_W, hdr_top))
+
     # Separator rule below day numbers
     hrule(c, MARGIN + TIME_COL_W, hdr_sep_y, CONTENT_W - TIME_COL_W,
           col=C_SILVER, lw=0.5)
