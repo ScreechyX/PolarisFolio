@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+*.local
+
+# App secrets & token caches
+~/.polarisfolio_msal_cache.json
+~/.polarisfolio_rm_token
+~/.polarisfolio_auth_flow.json
+~/.polarisfolio_token_cache.json
+*.msal_cache.json
+*_rm_token
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated PDFs
+polarisfolio_pdfs/
+*.pdf
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Node (if frontend tooling ever added)
+node_modules/

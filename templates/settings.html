@@ -87,6 +87,98 @@
       </div>
     </div>
 
+    <!-- Timezone -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-title">Timezone</div>
+
+      <div class="form-group" style="margin-bottom: 0;">
+        <label>Display timezone for generated planners</label>
+        <select name="timezone" style="max-width: 320px;">
+          {% set tz_current = settings.get('timezone', 'UTC') %}
+          {% set timezones = [
+            ('UTC', 'UTC'),
+            ('Australia/Brisbane', 'Australia/Brisbane (AEST, no DST)'),
+            ('Australia/Sydney', 'Australia/Sydney (AEST/AEDT)'),
+            ('Australia/Melbourne', 'Australia/Melbourne (AEST/AEDT)'),
+            ('Australia/Perth', 'Australia/Perth (AWST)'),
+            ('Australia/Adelaide', 'Australia/Adelaide (ACST/ACDT)'),
+            ('Australia/Darwin', 'Australia/Darwin (ACST)'),
+            ('Pacific/Auckland', 'Pacific/Auckland (NZST/NZDT)'),
+            ('Asia/Singapore', 'Asia/Singapore (SGT)'),
+            ('Asia/Tokyo', 'Asia/Tokyo (JST)'),
+            ('Europe/London', 'Europe/London (GMT/BST)'),
+            ('Europe/Berlin', 'Europe/Berlin (CET/CEST)'),
+            ('America/New_York', 'America/New_York (EST/EDT)'),
+            ('America/Chicago', 'America/Chicago (CST/CDT)'),
+            ('America/Denver', 'America/Denver (MST/MDT)'),
+            ('America/Los_Angeles', 'America/Los_Angeles (PST/PDT)'),
+          ] %}
+          {% for tz_val, tz_label in timezones %}
+          <option value="{{ tz_val }}" {% if tz_val == tz_current %}selected{% endif %}>{{ tz_label }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-hint">Event times in the PDF will be shown in this timezone.</div>
+      </div>
+    </div>
+
+    <!-- Auto-schedule -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-title">Auto-schedule</div>
+      <div class="form-hint" style="margin-bottom: 16px;">
+        Automatically generate (and optionally upload) a planner on a recurring schedule.
+      </div>
+
+      <div class="form-group">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <input type="checkbox" name="schedule_enabled" value="1"
+            {% if settings.get('schedule_enabled') == '1' %}checked{% endif %}>
+          Enable auto-generate
+        </label>
+      </div>
+
+      <div class="grid-2" style="gap: 12px;">
+        <div class="form-group">
+          <label>Day of week</label>
+          <select name="schedule_day">
+            {% set sday = settings.get('schedule_day', 'mon') %}
+            {% for val, label in [('mon','Monday'),('tue','Tuesday'),('wed','Wednesday'),('thu','Thursday'),('fri','Friday'),('sat','Saturday'),('sun','Sunday')] %}
+            <option value="{{ val }}" {% if val == sday %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Hour (24h)</label>
+          <select name="schedule_hour">
+            {% set shour = settings.get('schedule_hour', '7') | int %}
+            {% for h in range(24) %}
+            <option value="{{ h }}" {% if h == shour %}selected{% endif %}>{{ '%02d:00' % h }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2" style="gap: 12px;">
+        <div class="form-group">
+          <label>Weeks ahead to plan</label>
+          <select name="schedule_weeks_ahead">
+            {% set sweeks = settings.get('schedule_weeks_ahead', '2') %}
+            {% for w in ['1','2','3','4','6','8'] %}
+            <option value="{{ w }}" {% if w == sweeks %}selected{% endif %}>{{ w }} week{% if w != '1' %}s{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Auto-upload to reMarkable</label>
+          <select name="schedule_upload">
+            <option value="0" {% if settings.get('schedule_upload', '0') == '0' %}selected{% endif %}>Generate only</option>
+            <option value="1" {% if settings.get('schedule_upload') == '1' %}selected{% endif %}>Generate + upload</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
     <button type="submit" class="btn btn-primary">Save settings</button>
 
   </form>

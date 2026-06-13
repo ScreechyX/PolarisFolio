@@ -35,6 +35,7 @@ from database import (
     get_ical_feeds, add_ical_feed, toggle_ical_feed, delete_ical_feed,
     add_upload, get_uploads,
 )
+from scheduler import scheduler, apply_schedule
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -54,6 +55,13 @@ TOKEN_CACHE_FILE = os.path.expanduser("~/.polarisfolio_msal_cache.json")
 @app.on_event("startup")
 async def startup():
     await init_db()
+    scheduler.start()
+    await apply_schedule()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    scheduler.shutdown(wait=False)
 
 
 # ---------------------------------------------------------------------------
@@ -351,12 +359,14 @@ async def _run_generation(
     filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}.pdf"
     pdf_path = os.path.join(PDF_DIR, filename)
 
+    tz_name = await get_setting("timezone", "UTC")
     build_planner(
         events=events,
         output_path=pdf_path,
         start_date=start,
         end_date=end,
         title=display_name,
+        timezone_name=tz_name,
     )
 
     # Upload
@@ -431,16 +441,29 @@ async def save_settings(
     ms_client_id: str = Form(""),
     rm_token: str = Form(""),
     rm_folder: str = Form("/PolarisFolio"),
+    timezone: str = Form("UTC"),
+    schedule_enabled: str = Form("0"),
+    schedule_day: str = Form("mon"),
+    schedule_hour: str = Form("7"),
+    schedule_weeks_ahead: str = Form("2"),
+    schedule_upload: str = Form("0"),
 ):
     if ms_client_id:
         await set_setting("ms_client_id", ms_client_id.strip())
     if rm_token:
-        # Save RM device token
         token_file = os.path.expanduser("~/.polarisfolio_rm_token")
         with open(token_file, "w") as f:
             f.write(rm_token.strip())
         os.chmod(token_file, 0o600)
     await set_setting("rm_folder", rm_folder.strip() or "/PolarisFolio")
+    await set_setting("timezone", timezone.strip() or "UTC")
+    await set_setting("schedule_enabled", schedule_enabled)
+    await set_setting("schedule_day", schedule_day)
+    await set_setting("schedule_hour", schedule_hour)
+    await set_setting("schedule_weeks_ahead", schedule_weeks_ahead)
+    await set_setting("schedule_upload", schedule_upload)
+
+    await apply_schedule()
 
     return RedirectResponse("/settings?success=saved", status_code=303)
 

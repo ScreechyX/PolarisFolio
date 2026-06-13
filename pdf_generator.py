@@ -13,6 +13,7 @@ import os
 import calendar
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -69,6 +70,15 @@ def draw_text(c: canvas.Canvas, x: float, y: float, text: str,
         c.drawCentredString(x, y, text)
     else:
         c.drawString(x, y, text)
+
+
+def _time_str(event, tz: ZoneInfo) -> str:
+    """Returns a display time string for an event in the given timezone."""
+    if event.is_all_day:
+        return "All day"
+    start = event.start.astimezone(tz)
+    end = event.end.astimezone(tz)
+    return f"{start.strftime('%I:%M %p')} - {end.strftime('%I:%M %p')}"
 
 
 def draw_rule(c: canvas.Canvas, x: float, y: float, width: float,
@@ -217,11 +227,13 @@ HOURS      = HOUR_END - HOUR_START
 def draw_day_page(c: canvas.Canvas, day: date,
                   events: list[CalendarEvent],
                   event_page_map: dict[str, int],
-                  month_page_num: int):
+                  month_page_num: int,
+                  tz: ZoneInfo = None):
     """
     Draws a daily schedule page with hourly time slots.
     Each event block is a tap target linking to its meeting note page.
     """
+    tz = tz or timezone.utc
     day_label = day.strftime("%A")
     date_label = day.strftime("%-d %B %Y")
     month_back = day.strftime("%B %Y")
@@ -278,11 +290,13 @@ def draw_day_page(c: canvas.Canvas, day: date,
 
     # Timed event blocks
     for event in timed:
-        if event.start.hour < HOUR_START or event.start.hour >= HOUR_END:
+        local_start = event.start.astimezone(tz)
+        local_end = event.end.astimezone(tz)
+        if local_start.hour < HOUR_START or local_start.hour >= HOUR_END:
             continue
 
-        start_offset = (event.start.hour - HOUR_START) + event.start.minute / 60
-        end_hour = min(event.end.hour + event.end.minute / 60, HOUR_END)
+        start_offset = (local_start.hour - HOUR_START) + local_start.minute / 60
+        end_hour = min(local_end.hour + local_end.minute / 60, HOUR_END)
         end_offset = end_hour - HOUR_START
         duration_slots = end_offset - start_offset
 
@@ -300,7 +314,7 @@ def draw_day_page(c: canvas.Canvas, day: date,
 
         # Time + duration
         if eh > 8 * mm:
-            meta = f"{event.time_str}  {event.duration_str}"
+            meta = f"{_time_str(event, tz)}  {event.duration_str}"
             draw_text(c, event_col_x + 3 * mm, ey + eh - 9 * mm,
                       meta, size=6, color=C_DARK_GREY,
                       max_width=event_col_w - 8 * mm)
@@ -322,14 +336,17 @@ def draw_day_page(c: canvas.Canvas, day: date,
 # ---------------------------------------------------------------------------
 
 def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
-                      day_page_num: int):
+                      day_page_num: int, tz: ZoneInfo = None):
     """
     Draws a meeting note page for a single event.
     Includes metadata header and a lined writing area below.
     """
-    day_label = event.start.strftime("%A %-d %B")
+    tz = tz or timezone.utc
+    local_start = event.start.astimezone(tz)
+    day_label = local_start.strftime("%A %-d %B")
+    time_label = _time_str(event, tz)
     content_y = draw_header(c, event.title, day_label,
-                            page_label=event.time_str)
+                            page_label=time_label)
 
     # Back link to daily page
     day_key = event.start.strftime("%Y-%m-%d")
@@ -345,7 +362,7 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
 
     # Metadata pills row
     meta_items = [
-        ("Time", event.time_str),
+        ("Time", time_label),
         ("Duration", event.duration_str),
     ]
     if event.location:
@@ -458,6 +475,7 @@ def build_planner(
     start_date: date = None,
     end_date: date = None,
     title: str = "Planner",
+    timezone_name: str = "UTC",
 ):
     """
     Builds the full linked PDF planner.
@@ -470,6 +488,11 @@ def build_planner(
         start_date = date.today()
     if not end_date:
         end_date = start_date + timedelta(days=30)
+
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
 
     # Determine months to cover
     months = []
@@ -563,7 +586,8 @@ def build_planner(
                 draw_day_page(
                     c, d, day_events,
                     event_page_map,
-                    month_page_map[month_key]
+                    month_page_map[month_key],
+                    tz=tz,
                 )
                 c.showPage()
 
@@ -576,7 +600,7 @@ def build_planner(
             f"event_{e.id}", level=2
         )
 
-        draw_meeting_page(c, e, day_page_map.get(day_key, 1))
+        draw_meeting_page(c, e, day_page_map.get(day_key, 1), tz=tz)
         c.showPage()
 
     c.save()

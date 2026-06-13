@@ -9,3 +9,4 @@ icalendar
 python-dateutil
 msal
 reportlab
+apscheduler
