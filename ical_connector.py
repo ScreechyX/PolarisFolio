@@ -62,9 +62,10 @@ def parse_ical(
     """
     cal = Calendar.from_ical(ical_data)
 
-    masters = {}      # uid -> component (has RRULE)
-    exceptions = {}   # uid -> [recurrence-id datetimes] (modified instances)
-    singles = []      # plain non-recurring VEVENTs
+    masters = {}           # uid -> component (has RRULE)
+    exc_datetimes = {}     # uid -> [recurrence-id datetimes] for RRULE exclusion
+    exc_components = {}    # uid -> [components] for orphan fallback
+    singles = []           # plain non-recurring VEVENTs
 
     for component in cal.walk():
         if component.name != "VEVENT":
@@ -75,11 +76,13 @@ def parse_ical(
         rrule = component.get("RRULE")
 
         if recurrence_id:
-            # Modified/cancelled instance — track so we exclude it from RRULE expansion
+            # Modified/cancelled instance — track datetime for RRULE exclusion,
+            # and keep the component in case there's no master (orphan instance)
             is_all_day = [False]
             exc_dt = _to_datetime(recurrence_id, is_all_day)
             if exc_dt:
-                exceptions.setdefault(uid, []).append(exc_dt)
+                exc_datetimes.setdefault(uid, []).append(exc_dt)
+            exc_components.setdefault(uid, []).append(component)
         elif rrule:
             masters[uid] = component
         else:
@@ -87,12 +90,23 @@ def parse_ical(
 
     events = []
 
-    # Expand recurring masters
+    # Expand recurring masters (excluding modified instances)
     for uid, component in masters.items():
-        extra_exdates = exceptions.get(uid, [])
         expanded = _expand_vevent(component, calendar_name, start_date, end_date,
-                                  extra_exdates=extra_exdates)
+                                  extra_exdates=exc_datetimes.get(uid, []))
         events.extend(expanded)
+
+    # Orphaned exception instances (RECURRENCE-ID with no master in this feed window)
+    # — parse them as regular events rather than discarding them
+    for uid, components in exc_components.items():
+        if uid not in masters:
+            for component in components:
+                parsed = _parse_vevent(component, calendar_name)
+                if parsed is None:
+                    continue
+                if parsed.end < start_date or parsed.start > end_date:
+                    continue
+                events.append(parsed)
 
     # Parse non-recurring singles
     for component in singles:
