@@ -542,8 +542,11 @@ def build_planner(
                 day_page_map[day_key] = page_num
                 page_num += 1
 
-    # Meeting note pages (one per timed event)
-    all_timed_events = [e for e in events if not e.is_all_day]
+    # Meeting note pages (one per timed event that has a day page)
+    all_timed_events = [
+        e for e in events
+        if not e.is_all_day and e.start.strftime("%Y-%m-%d") in day_page_map
+    ]
     for e in sorted(all_timed_events, key=lambda x: x.start):
         event_page_map[e.id] = page_num
         page_num += 1
