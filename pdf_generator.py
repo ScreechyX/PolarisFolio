@@ -921,29 +921,19 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
     ls  = event.start.astimezone(tz)
     month = ls.month
 
-    draw_tab(c, month)
+    draw_tab(c, month, month_bookmark=f"month_{ls.year}_{ls.month:02d}")
 
-    day_label  = ls.strftime("%A %-d %B %Y")
-    time_label = _time_label(event, tz)
+    day_label = ls.strftime("%A %-d %B %Y")
 
     sep_y = draw_page_header(
         c,
         left_label=event.title,
         left_sub=day_label,
-        right_label=time_label,
-        right_sub=event.duration_str,
         accent_bar=True,
     )
 
-    # Back link
-    c.setFont("Helvetica", 7)
-    c.setFillColor(C_ACCENT)
-    back_x = MARGIN + CONTENT_W
-    back_y = PAGE_H - MARGIN - 20
-    c.drawRightString(back_x, back_y, "← Week")
-    c.linkAbsolute("", week_bookmark,
-                   (back_x - 18 * mm, back_y - 1 * mm,
-                    back_x, back_y + 5 * mm))
+    month_bm = f"month_{ls.year}_{ls.month:02d}"
+    draw_nav_buttons(c, "week", month_bm=month_bm, week_bm=week_bookmark)
 
     y = sep_y - 6 * mm
 
@@ -1091,18 +1081,8 @@ def build_planner(
             dk = (w + timedelta(days=i)).strftime("%Y-%m-%d")
             day_week_map[dk] = bm
 
-    # ── Pass 1: assign page numbers ──────────────────────────────────────────
-    pg = 1
-    for _ in months: pg += 1          # one page per month
-    month_start_pg = 1
-    week_start_pg  = len(months) + 1
-
-    week_pg: dict[str, int] = {}
-    for i, w in enumerate(weeks):
-        week_pg[w.isoformat()] = week_start_pg + i
-    pg = week_start_pg + len(weeks)
-
-    # Meeting note pages — one per timed event that falls in our day_week_map
+    # ── Pass 1: build event lookup tables ────────────────────────────────────
+    # Timed events that fall on a weekday covered by a week page
     timed_events = [
         e for e in events
         if not e.is_all_day
@@ -1110,17 +1090,39 @@ def build_planner(
     ]
     timed_events.sort(key=lambda e: e.start)
 
-    event_pg:    dict[str, int] = {}
+    event_pg:    dict[str, int] = {}   # id → truthy (page number unused; existence check only)
     event_wk_bm: dict[str, str] = {}
-    for e in timed_events:
-        event_pg[e.id] = pg
-        dk = e.start.astimezone(tz).strftime("%Y-%m-%d")
+    for i, e in enumerate(timed_events, start=1):
+        event_pg[e.id]    = i
+        dk                = e.start.astimezone(tz).strftime("%Y-%m-%d")
         event_wk_bm[e.id] = day_week_map[dk]
-        pg += 1
 
-    total_pages = pg - 1
+    # Group weeks under the active month they first overlap with (Mon's month,
+    # or next active month if that Monday falls before the range).
+    active_month_set = set(months)
 
-    # ── Pass 2: draw pages ───────────────────────────────────────────────────
+    def _week_month_key(w):
+        for i in range(7):
+            key = ((w + timedelta(days=i)).year, (w + timedelta(days=i)).month)
+            if key in active_month_set:
+                return key
+        return (w.year, w.month)
+
+    from collections import defaultdict
+    weeks_by_month: dict = defaultdict(list)
+    for w in weeks:
+        weeks_by_month[_week_month_key(w)].append(w)
+
+    # Group timed events under their week Monday
+    events_by_week: dict = defaultdict(list)
+    for e in timed_events:
+        dk   = e.start.astimezone(tz).strftime("%Y-%m-%d")
+        wbm  = day_week_map[dk]
+        wmon = date.fromisoformat(wbm.replace("week_", ""))
+        events_by_week[wmon].append(e)
+
+    # ── Pass 2: draw pages in interleaved order ───────────────────────────────
+    # Order: Year → [Month overview → Week → Event notes → Week → …] × months
     c = canvas.Canvas(output_path, pagesize=A4)
     c.setTitle(title)
     c.setAuthor("PolarisFolio")
@@ -1129,43 +1131,42 @@ def build_planner(
     year_val = start_date.year
     c.bookmarkPage(YEAR_BM)
     c.addOutlineEntry(str(year_val), YEAR_BM, level=0)
-    active_months = {month for (yr, month) in months if yr == year_val}
-    draw_year_page(c, year_val, day_week_map, active_months=active_months)
+    active_months_set_int = {month for (yr, month) in months if yr == year_val}
+    draw_year_page(c, year_val, day_week_map, active_months=active_months_set_int)
     c.showPage()
 
-    # Monthly overviews
     for year, month in months:
-        bm = f"month_{year}_{month:02d}"
-        c.bookmarkPage(bm)
+        # Month overview
+        month_bm = f"month_{year}_{month:02d}"
+        c.bookmarkPage(month_bm)
         c.addOutlineEntry(
-            datetime(year, month, 1).strftime("%B %Y"), bm, level=0)
+            datetime(year, month, 1).strftime("%B %Y"), month_bm, level=0)
         draw_month_page(c, year, month, ev_by_month[(year, month)], day_week_map)
         c.showPage()
 
-    # Weekly spreads
-    for w in weeks:
-        bm = f"week_{w.isoformat()}"
-        c.bookmarkPage(bm)
-        fri = w + timedelta(days=4)
-        c.addOutlineEntry(
-            f"Week {w.isocalendar()[1]} · {w.strftime('%-d %b')} – {fri.strftime('%-d %b')}",
-            bm, level=1)
-        wk_evts = {
-            (w + timedelta(days=i)).strftime("%Y-%m-%d"):
-            ev_by_day.get((w + timedelta(days=i)).strftime("%Y-%m-%d"), [])
-            for i in range(5)
-        }
-        month_bm = f"month_{w.year}_{w.month:02d}"
-        draw_week_page(c, w, wk_evts, event_pg, tz, month_bookmark=month_bm)
-        c.showPage()
+        # Weeks that belong to this month, in chronological order
+        for w in weeks_by_month.get((year, month), []):
+            week_bm = f"week_{w.isoformat()}"
+            c.bookmarkPage(week_bm)
+            fri = w + timedelta(days=4)
+            c.addOutlineEntry(
+                f"Week {w.isocalendar()[1]} · {w.strftime('%-d %b')} – {fri.strftime('%-d %b')}",
+                week_bm, level=1)
+            wk_evts = {
+                (w + timedelta(days=i)).strftime("%Y-%m-%d"):
+                ev_by_day.get((w + timedelta(days=i)).strftime("%Y-%m-%d"), [])
+                for i in range(5)
+            }
+            draw_week_page(c, w, wk_evts, event_pg, tz, month_bookmark=month_bm)
+            c.showPage()
 
-    # Meeting notes
-    for e in timed_events:
-        bm = f"event_{e.id}"
-        c.bookmarkPage(bm)
-        c.addOutlineEntry(f"  {e.title[:40]}", bm, level=2)
-        draw_meeting_page(c, e, event_wk_bm[e.id], tz=tz)
-        c.showPage()
+            # Event detail pages for this week, sorted by start time
+            for e in sorted(events_by_week.get(w, []), key=lambda e: e.start):
+                event_bm = f"event_{e.id}"
+                c.bookmarkPage(event_bm)
+                c.addOutlineEntry(f"  {e.title[:40]}", event_bm, level=2)
+                draw_meeting_page(c, e, event_wk_bm[e.id], tz=tz)
+                c.showPage()
 
     c.save()
     print(f"PDF saved: {output_path}  ({total_pages} pages)")
