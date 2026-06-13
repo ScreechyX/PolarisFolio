@@ -351,8 +351,11 @@ async def _run_generation(
     if not manager._sources:
         return
 
-    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+    tz_name = await get_setting("timezone", "UTC")
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(tz_name)
+    start_dt = datetime(start.year, start.month, start.day, 0, 0, 0, tzinfo=tz)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=tz)
 
     events = manager.get_events(start_dt, end_dt)
 
@@ -360,8 +363,6 @@ async def _run_generation(
     display_name = f"PolarisFolio {start.strftime('%b %Y')}"
     filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}.pdf"
     pdf_path = os.path.join(PDF_DIR, filename)
-
-    tz_name = await get_setting("timezone", "UTC")
     build_planner(
         events=events,
         output_path=pdf_path,
@@ -520,8 +521,10 @@ async def event_count(start: str, end: str):
     if not manager._sources:
         return JSONResponse({"count": 0, "error": "no_sources"})
 
-    start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(await get_setting("timezone", "UTC"))
+    start_dt = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0, tzinfo=tz)
+    end_dt = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, tzinfo=tz)
 
     try:
         events = manager.get_events(start_dt, end_dt)
