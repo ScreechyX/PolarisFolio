@@ -154,11 +154,9 @@
         </div>
 
         <!-- Event preview -->
-        <div class="preview-strip" id="previewStrip">
+        <div class="preview-strip" id="previewStrip" style="display: none;">
           <div>
-            <div class="preview-count" id="previewCount">
-              <span class="spinner"></span>
-            </div>
+            <div class="preview-count" id="previewCount">--</div>
             <div class="preview-label">events in range</div>
           </div>
           <div class="preview-range" id="previewRange">
@@ -166,12 +164,13 @@
           </div>
         </div>
 
-        <!-- Quick range buttons -->
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <!-- Quick range buttons + check events -->
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
           <button type="button" class="btn btn-secondary btn-sm" onclick="setRange(7)">7 days</button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="setRange(14)">14 days</button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="setRange(30)">30 days</button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="setThisMonth()">This month</button>
+          <button type="button" class="btn btn-primary btn-sm" id="checkBtn" onclick="fetchCount(true)" style="margin-left: auto;">Check events</button>
         </div>
       </div>
 
@@ -256,36 +255,42 @@
     folderRow.style.display = uploadToggle.checked ? 'flex' : 'none';
   });
 
-  let debounce;
-  function fetchCount() {
-    clearTimeout(debounce);
-    debounce = setTimeout(async () => {
-      const start = startEl.value;
-      const end = endEl.value;
-      if (!start || !end) return;
-
-      const days = Math.round((new Date(end) - new Date(start)) / 86400000);
-      badgeEl.textContent = days + ' day' + (days !== 1 ? 's' : '');
-      rangeEl.textContent = start + ' → ' + end;
-      countEl.innerHTML = '<span class="spinner"></span>';
-
-      try {
-        const res = await fetch(`/api/events/count?start=${start}&end=${end}`);
-        const data = await res.json();
-        if (data.error === 'no_sources') {
-          countEl.textContent = '--';
-        } else {
-          countEl.textContent = data.count;
-        }
-      } catch {
-        countEl.textContent = '--';
-      }
-    }, 600);
+  function updateDaysBadge() {
+    const start = startEl.value;
+    const end = endEl.value;
+    if (!start || !end) return;
+    const days = Math.round((new Date(end) - new Date(start)) / 86400000);
+    badgeEl.textContent = days + ' day' + (days !== 1 ? 's' : '');
+    // Hide the preview strip when dates change so stale count isn't shown
+    document.getElementById('previewStrip').style.display = 'none';
   }
 
-  startEl.addEventListener('change', fetchCount);
-  endEl.addEventListener('change', fetchCount);
-  fetchCount();
+  async function fetchCount(manual) {
+    const start = startEl.value;
+    const end = endEl.value;
+    if (!start || !end) return;
+
+    const strip = document.getElementById('previewStrip');
+    strip.style.display = 'flex';
+    rangeEl.textContent = start + ' → ' + end;
+    countEl.innerHTML = '<span class="spinner"></span>';
+
+    const btn = document.getElementById('checkBtn');
+    btn.disabled = true;
+
+    try {
+      const res = await fetch(`/api/events/count?start=${start}&end=${end}`);
+      const data = await res.json();
+      countEl.textContent = data.error === 'no_sources' ? '--' : data.count;
+    } catch {
+      countEl.textContent = '--';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  startEl.addEventListener('change', updateDaysBadge);
+  endEl.addEventListener('change', updateDaysBadge);
 
   function setRange(days) {
     const start = new Date();
@@ -293,7 +298,7 @@
     end.setDate(end.getDate() + days);
     startEl.value = start.toISOString().split('T')[0];
     endEl.value = end.toISOString().split('T')[0];
-    fetchCount();
+    updateDaysBadge();
   }
 
   function setThisMonth() {
@@ -302,7 +307,7 @@
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     startEl.value = start.toISOString().split('T')[0];
     endEl.value = end.toISOString().split('T')[0];
-    fetchCount();
+    updateDaysBadge();
   }
 
   // Disable button on submit to prevent double-click
