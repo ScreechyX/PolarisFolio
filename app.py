@@ -49,6 +49,9 @@ templates = Jinja2Templates(directory="templates")
 PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")
 os.makedirs(PDF_DIR, exist_ok=True)
 
+# Simple daily cache for dashboard event data
+_dashboard_cache: dict = {"date": None, "upcoming_by_day": []}
+
 MS_SCOPES = ["Calendars.Read", "User.Read"]
 MS_AUTHORITY = "https://login.microsoftonline.com/common"
 TOKEN_CACHE_FILE = os.path.expanduser("~/.polarisfolio_msal_cache.json")
@@ -129,50 +132,51 @@ async def dashboard(request: Request):
     feeds = await get_ical_feeds()
     uploads = await get_uploads(limit=5)
 
-    # Upcoming events — next 3 days from all sources
+    # Upcoming events — next 3 days from all sources, cached until midnight
     from calendar_manager import CalendarManager
     from zoneinfo import ZoneInfo
+    from collections import defaultdict
     tz_name = await get_setting("timezone") or "UTC"
     try:
         tz = ZoneInfo(tz_name)
     except Exception:
         tz = ZoneInfo("UTC")
 
-    upcoming_by_day = []   # list of (label, date_str, [events])
-    try:
-        manager = CalendarManager()
-        if ms_ok:
-            token = await get_ms_token()
-            manager.add_graph_source(token)
-        for feed in feeds:
-            if feed["enabled"] and feed.get("url"):
-                manager.add_ical_source(feed["url"], name=feed.get("name", "ICS Feed"))
+    today = datetime.now(tz).date()
+    upcoming_by_day = []
 
-        now = datetime.now(timezone.utc)
-        events = manager.get_events(now, now + timedelta(days=3))
+    if _dashboard_cache["date"] == today:
+        upcoming_by_day = _dashboard_cache["upcoming_by_day"]
+    else:
+        try:
+            manager = CalendarManager()
+            if ms_ok:
+                token = await get_ms_token()
+                manager.add_graph_source(token)
+            for feed in feeds:
+                if feed["enabled"] and feed.get("url"):
+                    manager.add_ical_source(feed["url"], name=feed.get("name", "ICS Feed"))
 
-        from collections import defaultdict
-        by_day = defaultdict(list)
-        for e in events:
-            if not e.is_all_day:
-                day_key = e.start.astimezone(tz).strftime("%Y-%m-%d")
-                by_day[day_key].append(e)
+            now = datetime.now(timezone.utc)
+            events = manager.get_events(now, now + timedelta(days=3))
 
-        import datetime as dt_mod
-        today = datetime.now(tz).date()
-        for i in range(3):
-            d = today + dt_mod.timedelta(days=i)
-            key = d.strftime("%Y-%m-%d")
-            if i == 0:
-                label = "Today"
-            elif i == 1:
-                label = "Tomorrow"
-            else:
-                label = d.strftime("%A")
-            date_str = d.strftime("%-d %B")
-            upcoming_by_day.append((label, date_str, by_day.get(key, [])))
-    except Exception:
-        pass
+            by_day: dict = defaultdict(list)
+            for e in events:
+                if not e.is_all_day:
+                    day_key = e.start.astimezone(tz).strftime("%Y-%m-%d")
+                    by_day[day_key].append(e)
+
+            for i in range(3):
+                d = today + timedelta(days=i)
+                key = d.strftime("%Y-%m-%d")
+                label = "Today" if i == 0 else "Tomorrow" if i == 1 else d.strftime("%A")
+                date_str = d.strftime("%-d %B")
+                upcoming_by_day.append((label, date_str, by_day.get(key, [])))
+
+            _dashboard_cache["date"] = today
+            _dashboard_cache["upcoming_by_day"] = upcoming_by_day
+        except Exception:
+            pass
 
     upcoming = [e for _, _, evts in upcoming_by_day for e in evts]
 
