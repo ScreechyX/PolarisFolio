@@ -328,7 +328,8 @@ def draw_page_header(c: canvas.Canvas,
 
 _MINI_DOW = ["M", "T", "W", "T", "F", "S", "S"]
 
-def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict):
+def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
+                   active_months: set = None):
     """
     Full-year calendar: 3-col × 4-row mini-month grid.
     All 12 month tabs are shown as equal-height segments on the right edge.
@@ -345,9 +346,10 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict):
         fill_col = colors.HexColor(MONTH_TAB_COLORS[(m - 1) % 12])
         y0 = PAGE_H - m * seg_h
         filled_rect(c, tab_x, y0, TAB_W, seg_h, fill=fill_col)
-        # Each tab segment links to that month
-        mbm = f"month_{year}_{m:02d}"
-        c.linkAbsolute("", mbm, (tab_x, y0, PAGE_W, y0 + seg_h))
+        # Each tab segment links to that month (only if it has a page)
+        if active_months is None or m in active_months:
+            mbm = f"month_{year}_{m:02d}"
+            c.linkAbsolute("", mbm, (tab_x, y0, PAGE_W, y0 + seg_h))
     vrule(c, tab_x, 0, PAGE_H, col=colors.HexColor("#00000018"), lw=0.5)
 
     # ── Page header ───────────────────────────────────────────────────────────
@@ -1127,7 +1129,8 @@ def build_planner(
     year_val = start_date.year
     c.bookmarkPage(YEAR_BM)
     c.addOutlineEntry(str(year_val), YEAR_BM, level=0)
-    draw_year_page(c, year_val, day_week_map)
+    active_months = {month for (yr, month) in months if yr == year_val}
+    draw_year_page(c, year_val, day_week_map, active_months=active_months)
     c.showPage()
 
     # Monthly overviews
