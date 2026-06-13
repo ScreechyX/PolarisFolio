@@ -19,7 +19,7 @@ Limitations of ICS feeds from M365:
 
 import hashlib
 import re
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional
 import requests
 from icalendar import Calendar, Event
@@ -50,7 +50,7 @@ def parse_ical(
 ) -> list[CalendarEvent]:
     """
     Parses raw ICS bytes and returns CalendarEvent objects
-    within the given date range.
+    within the given date range. Expands RRULE recurring events.
     """
     cal = Calendar.from_ical(ical_data)
     events = []
@@ -59,19 +59,117 @@ def parse_ical(
         if component.name != "VEVENT":
             continue
 
-        parsed = _parse_vevent(component, calendar_name)
-        if parsed is None:
-            continue
+        expanded = _expand_vevent(component, calendar_name, start_date, end_date)
+        events.extend(expanded)
 
-        # Filter to date range
-        if parsed.end < start_date or parsed.start > end_date:
-            continue
-
-        events.append(parsed)
-
-    # Sort by start time
     events.sort(key=lambda e: e.start)
     return events
+
+
+def _expand_vevent(
+    component,
+    calendar_name: str,
+    start_date: datetime,
+    end_date: datetime,
+) -> list[CalendarEvent]:
+    """
+    Returns one CalendarEvent per occurrence of this VEVENT within the
+    date range. Non-recurring events return a list of 0 or 1 items.
+    Recurring events (RRULE) are expanded using dateutil.
+    """
+    rrule_raw = component.get("RRULE")
+    if not rrule_raw:
+        # Non-recurring: parse once and filter
+        parsed = _parse_vevent(component, calendar_name)
+        if parsed is None:
+            return []
+        if parsed.end < start_date or parsed.start > end_date:
+            return []
+        return [parsed]
+
+    # Recurring event — expand instances
+    is_all_day = [False]
+    start_raw = component.get("DTSTART")
+    end_raw = component.get("DTEND") or component.get("DURATION")
+
+    master_start = _to_datetime(start_raw, is_all_day)
+    if master_start is None:
+        return []
+
+    # Calculate event duration
+    if end_raw and hasattr(end_raw, "dt"):
+        if hasattr(end_raw.dt, "days") and not isinstance(end_raw.dt, datetime):
+            # It's a timedelta (DURATION)
+            duration = end_raw.dt
+        else:
+            master_end = _to_datetime(end_raw, [False])
+            duration = (master_end - master_start) if master_end else timedelta(0)
+    else:
+        duration = timedelta(0)
+
+    # Build rrule string and expand
+    try:
+        rrule_str = rrule_raw.to_ical().decode()
+        rset = rruleset()
+        rule = rrulestr(f"RRULE:{rrule_str}", dtstart=master_start, ignoretz=False)
+        rset.rrule(rule)
+
+        # Add EXDATEs (exception dates / cancelled instances)
+        exdates = component.get("EXDATE")
+        if exdates:
+            if not isinstance(exdates, list):
+                exdates = [exdates]
+            for exdate_list in exdates:
+                for exdt in exdate_list.dts:
+                    dt = exdt.dt
+                    if isinstance(dt, date) and not isinstance(dt, datetime):
+                        dt = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
+                    elif dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    rset.exdate(dt)
+
+        uid = str(component.get("UID", ""))
+        title = str(component.get("SUMMARY", "(No title)"))
+        location_raw = component.get("LOCATION")
+        location = str(location_raw) if location_raw else None
+        description_raw = component.get("DESCRIPTION")
+        description = _clean_description(str(description_raw) if description_raw else None)
+        attendees = _parse_attendees(component)
+
+        results = []
+        for occurrence_start in rset.between(
+            start_date - timedelta(days=1),
+            end_date + timedelta(days=1),
+            inc=True,
+        ):
+            if occurrence_start.tzinfo is None:
+                occurrence_start = occurrence_start.replace(tzinfo=timezone.utc)
+            occurrence_end = occurrence_start + duration
+
+            if occurrence_end < start_date or occurrence_start > end_date:
+                continue
+
+            results.append(CalendarEvent(
+                id=_stable_id(uid, occurrence_start),
+                title=title,
+                start=occurrence_start,
+                end=occurrence_end,
+                location=location,
+                description=description,
+                attendees=attendees,
+                is_all_day=is_all_day[0],
+                calendar_name=calendar_name,
+                source="ical",
+            ))
+        return results
+
+    except Exception as e:
+        print(f"  Warning: failed to expand recurring event '{component.get('SUMMARY', '')}' - {e}")
+        # Fall back to the master event start if expansion fails
+        parsed = _parse_vevent(component, calendar_name)
+        if parsed and start_date <= parsed.start <= end_date:
+            return [parsed]
+        return []
 
 
 def get_events_from_url(
@@ -162,8 +260,6 @@ def _parse_vevent(component, calendar_name: str) -> Optional[CalendarEvent]:
 
         # Handle DURATION instead of DTEND
         if end_raw and hasattr(end_raw, "dt") and hasattr(end_raw.dt, "days"):
-            # It's a duration
-            from datetime import timedelta
             end = start + end_raw.dt
         else:
             end = _to_datetime(end_raw, is_all_day)
@@ -202,7 +298,6 @@ def _parse_vevent(component, calendar_name: str) -> Optional[CalendarEvent]:
 
 if __name__ == "__main__":
     import sys
-    from datetime import timedelta
 
     if len(sys.argv) < 2:
         print("Usage: python ical_connector.py <ICS_URL>")

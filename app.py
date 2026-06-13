@@ -160,6 +160,8 @@ async def auth_microsoft(request: Request):
         return RedirectResponse("/settings?error=no_client_id")
 
     redirect_uri = str(request.base_url) + "auth/callback"
+    if request.headers.get("x-forwarded-proto") == "https":
+        redirect_uri = redirect_uri.replace("http://", "https://", 1)
     cache = _load_msal_cache()
     ms_app = msal.PublicClientApplication(
         client_id, authority=MS_AUTHORITY, token_cache=cache
@@ -199,6 +201,8 @@ async def auth_callback(request: Request, code: str = None, error: str = None):
     )
 
     redirect_uri = str(request.base_url) + "auth/callback"
+    if request.headers.get("x-forwarded-proto") == "https":
+        redirect_uri = redirect_uri.replace("http://", "https://", 1)
     result = ms_app.acquire_token_by_auth_code_flow(
         flow,
         dict(request.query_params),
