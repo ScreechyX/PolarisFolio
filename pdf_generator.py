@@ -10,6 +10,7 @@ Optimised for reMarkable Paper Pro (A4 portrait, colour e-ink display).
 """
 
 import os
+import re
 import calendar
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
@@ -1173,6 +1174,38 @@ def _time_label(evt, tz) -> str:
     return f"{s.strftime('%H:%M')} – {e.strftime('%H:%M')}"
 
 
+# A horizontal rule of underscores — Microsoft brackets the Teams join block
+# (URL, Meeting ID, passcode, dial-in, "Join the meeting now", etc.) between two
+# of these in the event body / bodyPreview.
+_RULE_RE = re.compile(r"_{4,}")
+# Markers that identify an underscore-delimited block as Teams boilerplate.
+_TEAMS_MARKERS = (
+    "microsoft teams",
+    "teams meeting",
+    "join the meeting",
+    "join on your computer",
+    "click here to join",
+    "meeting id:",
+    "meeting options",
+)
+_TEAMS_URL_RE = re.compile(r"https?://teams\.(?:microsoft|live)\.com\S*", re.I)
+
+
+def _strip_teams_boilerplate(text: str) -> str:
+    """Remove the Microsoft Teams join blurb from a meeting description so only
+    the real agenda remains. Drops any underscore-delimited section containing
+    Teams markers, then sweeps up any stray Teams join URLs."""
+    if not text:
+        return ""
+    parts = _RULE_RE.split(text)
+    if len(parts) > 1:
+        kept = [p for p in parts
+                if not any(m in p.lower() for m in _TEAMS_MARKERS)]
+        text = " ".join(kept)
+    text = _TEAMS_URL_RE.sub("", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
 def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
                       week_bookmark: str, tz=None, day_bookmark: str = ""):
     tz  = tz or timezone.utc
@@ -1244,12 +1277,13 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
         y -= 8 * mm
 
     # ── Agenda / description ──────────────────────────────────────────────────
-    if event.description:
+    agenda = _strip_teams_boilerplate(event.description)
+    if agenda:
         hrule(c, MARGIN, y, CONTENT_W, col=C_GHOST, lw=0.6)
         y -= 5 * mm
         txt(c, MARGIN, y, "Agenda", size=9, bold=True, col=C_INK_2)
         y -= 7 * mm
-        words = event.description.split()
+        words = agenda.split()
         line  = ""
         for word in words:
             test = (line + " " + word).strip()
