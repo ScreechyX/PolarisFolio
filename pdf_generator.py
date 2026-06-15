@@ -528,8 +528,10 @@ def _draw_year_edge_tabs(c: canvas.Canvas, year: int, active_months: set = None,
         c.drawCentredString(0, -2.3, text)
         c.restoreState()
 
-    # Year cap (top segment)
+    # Year cap (top segment) — taps back to the year overview
     _tab_label(PAGE_H - seg_h, str(year), C_INK)
+    if YEAR_BM in _NAV_VALID_BMS:
+        c.linkAbsolute("", YEAR_BM, (tab_x, PAGE_H - seg_h, PAGE_W, PAGE_H))
 
     # Month segments, each its own pastel + rotated abbreviation
     for m in range(1, 13):
