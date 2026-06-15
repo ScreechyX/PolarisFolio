@@ -73,6 +73,14 @@ _Q = ["#5BBFBF", "#5BBFBF", "#5BBFBF",   # Q1
       "#E5A030", "#E5A030", "#E5A030"]   # Q4
 MONTH_TAB_COLORS = _Q   # index 0=Jan … 11=Dec
 
+# Year-overview page: per-month tab pastels (Jan→Dec) + accents
+YEAR_TAB_COLORS = [
+    "#5BBFBF", "#6FB0E0", "#9B9BD4", "#8E96D6", "#E2A0C0", "#E58B8B",
+    "#E59A7A", "#E0B870", "#C9B98A", "#C99A7A", "#9AA8C0", "#8FB0A0",
+]
+C_TODAY_NAVY = colors.HexColor("#1F3A5F")   # year-page today circle
+C_CUR_PILL   = colors.HexColor("#E0656F")   # year-page current-month pill
+
 
 def _event_color(title: str) -> colors.Color:
     """Deterministic pastel colour from event title."""
@@ -340,14 +348,29 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
     """
     today = datetime.now(tz).date()
 
-    # ── All-12-months right-edge tabs ─────────────────────────────────────────
-    tab_x   = PAGE_W - TAB_W
-    seg_h   = PAGE_H / 12
+    # ── Right-edge tabs: "year" cap + 12 labeled month segments ───────────────
+    tab_x = PAGE_W - TAB_W
+    n_seg = 13                       # 1 year cap + 12 months
+    seg_h = PAGE_H / n_seg
+
+    def _tab_label(seg_y0: float, text: str, col):
+        filled_rect(c, tab_x, seg_y0, TAB_W, seg_h, fill=col)
+        c.saveState()
+        c.setFillColor(C_WHITE)
+        c.setFont("Helvetica-Bold", 7)
+        c.translate(tab_x + TAB_W / 2, seg_y0 + seg_h / 2)
+        c.rotate(90)
+        c.drawCentredString(0, -2.3, text)
+        c.restoreState()
+
+    # Year cap (top segment)
+    _tab_label(PAGE_H - seg_h, str(year), C_INK)
+
+    # Month segments, each its own pastel + rotated abbreviation
     for m in range(1, 13):
-        fill_col = colors.HexColor(MONTH_TAB_COLORS[(m - 1) % 12])
-        y0 = PAGE_H - m * seg_h
-        filled_rect(c, tab_x, y0, TAB_W, seg_h, fill=fill_col)
-        # Each tab segment links to that month (only if it has a page)
+        y0 = PAGE_H - (m + 1) * seg_h
+        _tab_label(y0, datetime(year, m, 1).strftime("%b").upper(),
+                   colors.HexColor(YEAR_TAB_COLORS[(m - 1) % 12]))
         if active_months is None or m in active_months:
             mbm = f"month_{year}_{m:02d}"
             c.linkAbsolute("", mbm, (tab_x, y0, PAGE_W, y0 + seg_h))
@@ -377,75 +400,100 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
     cell_w   = (avail_w - 2 * COL_GAP) / 3
     cell_h   = (avail_h - 3 * ROW_GAP) / 4
 
+    # Vertical rhythm inside a cell (block is centred within the cell)
+    NAME_OFFS = 4.5 * mm   # content top → month-name baseline
+    DOW_OFFS  = 5.2 * mm   # name → DOW row
+    GRID_OFFS = 3.4 * mm   # DOW row → first date row top
+    ROW_H     = 6.0 * mm   # date row height
+    N_ROWS    = 6          # max weeks shown (uniform across months)
+    block_h   = NAME_OFFS + DOW_OFFS + GRID_OFFS + N_ROWS * ROW_H
+
+    # Sunday-based week-of-year numbering (matches dayfo.io: Jan rows 1-5,
+    # Feb 6-9, …). Sun=0..Sat=6 index of 1 Jan anchors the count.
+    jan1_sun_idx = (date(year, 1, 1).weekday() + 1) % 7
+
     for m in range(1, 13):
         row  = (m - 1) // 3
         col  = (m - 1) % 3
         cx0  = MARGIN + col * (cell_w + COL_GAP)
-        # top-y of this cell
         cell_top = sep_y - ROW_GAP - row * (cell_h + ROW_GAP)
+        content_top = cell_top - max(0, (cell_h - block_h) / 2)
 
         is_cur = (m == today.month and year == today.year)
-        tab_col = MONTH_TAB_COLORS[(m - 1) % 12]
 
-        # Month name
+        # Week gutter + 7 day columns
+        wk_w   = cell_w * 0.11
+        day_w  = (cell_w - wk_w) / 7
+        day_x0 = cx0 + wk_w
+
+        # Month name (coral pill if current month)
         mname  = datetime(year, m, 1).strftime("%B").upper()
-        name_y = cell_top - 5.5 * mm
-
+        name_y = content_top - NAME_OFFS
         if is_cur:
             pw = c.stringWidth(mname, "Helvetica-Bold", 7) + 4 * mm
             pill_x = cx0 + cell_w / 2 - pw / 2
-            filled_rect(c, pill_x, name_y - 1.5 * mm, pw, 5.5 * mm,
-                        fill=colors.HexColor(tab_col), r=2)
+            filled_rect(c, pill_x, name_y - 1.6 * mm, pw, 5.4 * mm,
+                        fill=C_CUR_PILL, r=2)
             txt(c, cx0 + cell_w / 2, name_y, mname,
                 size=7, bold=True, col=C_WHITE, align="center")
         else:
             txt(c, cx0 + cell_w / 2, name_y, mname,
                 size=7, bold=True, col=C_INK, align="center")
 
-        # DOW row
-        dow_y   = name_y - 5.5 * mm
-        cell_sz = cell_w / 7
+        # DOW row:  W  S M T W T F S
+        dow_y = name_y - DOW_OFFS
+        txt(c, cx0 + wk_w / 2, dow_y, "W", size=5.5, col=C_SILVER, align="center")
         for di, d in enumerate(_MINI_DOW):
-            dx = cx0 + di * cell_sz + cell_sz / 2
-            col_d = C_GREY if di >= 5 else C_INK_2
+            dx = day_x0 + di * day_w + day_w / 2
+            col_d = C_GREY if di in (0, 6) else C_INK_2
             txt(c, dx, dow_y, d, size=6, col=col_d, align="center")
-
-        # Thin rule under DOW
         hrule(c, cx0, dow_y - 1 * mm, cell_w, col=C_GHOST, lw=0.5)
 
-        # Date cells
-        first   = date(year, m, 1)
-        dow0    = (first.weekday() + 1) % 7   # 0=Sun
-        _, n_days = calendar.monthrange(year, m)
-        date_y0 = dow_y - 5 * mm   # y of the first date row
+        # Date grid
+        weeks    = calendar.Calendar(firstweekday=6).monthdayscalendar(year, m)
+        grid_top = dow_y - GRID_OFFS
+        grid_bot = grid_top - N_ROWS * ROW_H
 
-        for day_num in range(1, n_days + 1):
-            slot      = dow0 + day_num - 1
-            grid_row  = slot // 7
-            grid_col  = slot % 7
-            dx = cx0 + grid_col * cell_sz + cell_sz / 2
-            dy = date_y0 - grid_row * 4.2 * mm
+        # Weekend column shading (full grid height)
+        for di in (0, 6):
+            sx = day_x0 + di * day_w
+            filled_rect(c, sx, grid_bot, day_w, grid_top - grid_bot, fill=C_WKND)
 
-            is_td   = (day_num == today.day and m == today.month
-                       and year == today.year)
-            is_wknd = (grid_col == 0 or grid_col == 6)   # Sun or Sat
+        for r, wk in enumerate(weeks):
+            ry = grid_top - r * ROW_H - ROW_H / 2   # row centre
+            dy = ry - 2                              # text baseline
 
-            if is_td:
-                circle(c, dx, dy + 1.5 * mm, 2.8 * mm,
-                       fill=C_INK)
-                txt(c, dx, dy, str(day_num), size=6.5, bold=True,
-                    col=C_WHITE, align="center")
-            else:
-                num_col = C_GREY if is_wknd else C_INK_2
-                txt(c, dx, dy, str(day_num), size=6.5,
-                    col=num_col, align="center")
+            # Week number in the gutter
+            sample = next((d for d in wk if d), None)
+            if sample:
+                yday   = date(year, m, sample).timetuple().tm_yday
+                wk_num = (yday + jan1_sun_idx - 1) // 7 + 1
+                txt(c, cx0 + wk_w / 2, dy, str(wk_num),
+                    size=5.5, col=C_SILVER, align="center")
 
-            # Tap → week page
-            day_key = date(year, m, day_num).strftime("%Y-%m-%d")
-            if day_key in day_week_map:
-                c.linkAbsolute("", day_week_map[day_key],
-                               (dx - cell_sz / 2, dy - 0.8 * mm,
-                                dx + cell_sz / 2, dy + 3.8 * mm))
+            for di, day_num in enumerate(wk):
+                if day_num == 0:
+                    continue
+                dx = day_x0 + di * day_w + day_w / 2
+                is_td   = (day_num == today.day and m == today.month
+                           and year == today.year)
+                is_wknd = di in (0, 6)
+
+                if is_td:
+                    circle(c, dx, ry, 2.6 * mm, fill=C_TODAY_NAVY)
+                    txt(c, dx, dy, str(day_num), size=6, bold=True,
+                        col=C_WHITE, align="center")
+                else:
+                    num_col = C_GREY if is_wknd else C_INK_2
+                    txt(c, dx, dy, str(day_num), size=6,
+                        col=num_col, align="center")
+
+                # Tap → week page
+                day_key = date(year, m, day_num).strftime("%Y-%m-%d")
+                if day_key in day_week_map:
+                    c.linkAbsolute("", day_week_map[day_key],
+                                   (dx - day_w / 2, ry - ROW_H / 2,
+                                    dx + day_w / 2, ry + ROW_H / 2))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
