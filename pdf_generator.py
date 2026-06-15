@@ -222,6 +222,39 @@ def _draw_list_icon(c: canvas.Canvas, cx, cy, sz, col):
         c.line(x0 + dot_r + 1.0 * mm, ly, x0 + dot_r + 1.0 * mm + line_w, ly)
 
 
+def _draw_chevron(c: canvas.Canvas, cx, cy, sz, col, left=True):
+    """A single ‹ or › chevron, centred on (cx, cy)."""
+    c.setStrokeColor(col)
+    c.setLineWidth(1.1)
+    c.setLineCap(1)
+    w = sz * 0.30
+    h = sz * 0.42
+    if left:
+        c.line(cx + w, cy + h, cx - w, cy)
+        c.line(cx - w, cy, cx + w, cy - h)
+    else:
+        c.line(cx - w, cy + h, cx + w, cy)
+        c.line(cx + w, cy, cx - w, cy - h)
+    c.setLineCap(0)
+
+
+def _draw_caps_label(c: canvas.Canvas, text: str, cx: float, baseline_y: float,
+                     size: float = 7, col=None, cs: float = 1.5):
+    """Centred, letter-spaced uppercase label (e.g. "CALENDAR", "WEEKLY PLAN").
+    Wrapped in save/restore so the text-object's char-spacing doesn't leak into
+    later drawString calls."""
+    total_w = c.stringWidth(text, "Helvetica-Bold", size) + cs * len(text)
+    c.saveState()
+    to = c.beginText()
+    to.setFont("Helvetica-Bold", size)
+    to.setFillColor(col if col is not None else C_GREY)
+    to.setCharSpace(cs)
+    to.setTextOrigin(cx - total_w / 2, baseline_y)
+    to.textOut(text)
+    c.drawText(to)
+    c.restoreState()
+
+
 def _draw_cal_button(c: canvas.Canvas, cx, cy, bw, bh, label, col):
     """Tear-off calendar glyph (two rings on top) with a centred label."""
     x = cx - bw / 2
@@ -252,7 +285,7 @@ _NAV_VALID_BMS: set = set()    # bookmark names that exist in this PDF
 
 
 def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
-                     omit=(), **_legacy):
+                     omit=(), prev_bm: str = "", next_bm: str = "", **_legacy):
     """
     Top-right navigation: Year (grid) · Month · Week · Day · List.
     Month/Week/Day are labelled tear-off calendar buttons showing TODAY
@@ -261,6 +294,7 @@ def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
     `active` highlights the current page type in the accent colour.
     `omit` is a collection of button names to drop (e.g. "year" on the year
     page, "month" on the current-month page — they would only link to self).
+    `prev_bm`/`next_bm` add ‹ › arrows that step to the adjacent week/day page.
     """
     today = _NAV_TODAY or date.today()
     valid = _NAV_VALID_BMS
@@ -282,15 +316,26 @@ def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
     if omit:
         buttons = [b for b in buttons if b[0] not in omit]
 
+    # Optional prev/next stepper arrows (week & day pages)
+    if prev_bm or next_bm:
+        buttons.append(("prev", "arrow_l", "", prev_bm))
+        buttons.append(("next", "arrow_r", "", next_bm))
+
     BH    = 6.5 * mm
     BW_C  = 9.0 * mm      # labelled calendar button
     BW_I  = 7.0 * mm      # icon-only button (year, list)
+    BW_A  = 6.0 * mm      # arrow button
     GAP   = 1.8 * mm
     right = MARGIN + CONTENT_W
     top   = PAGE_H - MARGIN
     cy    = top - 13      # vertically centred in the header band
 
-    widths  = [BW_I if k in ("grid", "list") else BW_C for (_, k, _, _) in buttons]
+    def _bw(kind):
+        if kind in ("grid", "list"):       return BW_I
+        if kind in ("arrow_l", "arrow_r"): return BW_A
+        return BW_C
+
+    widths  = [_bw(k) for (_, k, _, _) in buttons]
     total_w = sum(widths) + GAP * (len(buttons) - 1)
     x = right - total_w
 
@@ -301,6 +346,10 @@ def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
             _draw_grid_icon(c, cx, cy, BH * 0.9, col)
         elif kind == "list":
             _draw_list_icon(c, cx, cy, BH * 0.9, col)
+        elif kind == "arrow_l":
+            _draw_chevron(c, cx, cy, BH, col, left=True)
+        elif kind == "arrow_r":
+            _draw_chevron(c, cx, cy, BH, col, left=False)
         else:
             _draw_cal_button(c, cx, cy, bw, BH, label, col)
         if bm and bm in valid:
@@ -754,16 +803,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
     draw_nav_buttons(c, "month", month_bm=month_bm, week_bm=week_bm,
                      omit=("month",) if is_cur_month else ())
 
-    cal_label = "CALENDAR"
-    cs = 1.5   # extra letter spacing
-    cal_w = c.stringWidth(cal_label, "Helvetica-Bold", 7) + cs * len(cal_label)
-    to = c.beginText()
-    to.setFont("Helvetica-Bold", 7)
-    to.setFillColor(C_GREY)
-    to.setCharSpace(cs)
-    to.setTextOrigin(MARGIN + CONTENT_W / 2 - cal_w / 2, top - 22)
-    to.textOut(cal_label)
-    c.drawText(to)
+    _draw_caps_label(c, "CALENDAR", MARGIN + CONTENT_W / 2, top - 22)
 
     sep_y = top - 28
     hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
@@ -956,133 +996,118 @@ def draw_week_page(c: canvas.Canvas,
                    days_events: dict,
                    event_page_map: dict,
                    tz,
-                   month_bookmark: str = ""):
+                   month_bookmark: str = "",
+                   prev_week_bm: str = "",
+                   next_week_bm: str = "",
+                   prev_stats: dict = None):
     """
-    5-column Mon–Fri weekly spread with timed event blocks.
-    Matches Dayfolio layout: number-only headers, full-width all-day band,
-    FOCUS/PRIORITIES/HABIT CHART/TO DO LIST/NOTES bottom sections.
+    Dayfolio-style weekly plan: a Mon–Fri timed grid above a planning area
+    (FOCUS · PRIORITIES / HABITS · WEEK STATS / TO DO LIST · NOTES).
     """
     week_friday = week_monday + timedelta(days=4)
     month       = week_monday.month
     week_num    = _sunday_week_of_year(week_monday)
+    today       = datetime.now(tz).date()
 
     draw_tab(c, month, month_bookmark=month_bookmark)
 
-    # Header
+    # ── Header: month + year, stacked week number, centred WEEKLY PLAN ─────────
+    top = PAGE_H - MARGIN
     month_str = week_monday.strftime("%B").upper()
-    year_str  = str(week_monday.year)
-    label     = f"{month_str} {year_str}"
+    c.setFont("Helvetica-Bold", 15)
+    c.setFillColor(C_INK)
+    c.drawString(MARGIN, top - 11, month_str)
+    mw = c.stringWidth(month_str, "Helvetica-Bold", 15)
+    txt(c, MARGIN + mw + 5, top - 11, str(week_monday.year), size=15, col=C_GREY)
+    yr_w = c.stringWidth(str(week_monday.year), "Helvetica", 15)
+    wk_x = MARGIN + mw + 5 + yr_w + 5 * mm
+    txt(c, wk_x, top - 5, "WEEK", size=5.5, bold=True, col=C_GREY)
+    txt(c, wk_x, top - 13, str(week_num), size=11, bold=True, col=C_INK)
 
-    if week_monday.month == week_friday.month:
-        date_range = (f"WEEK {week_num}  ·  "
-                      f"{week_monday.day}–{week_friday.day} "
-                      f"{week_monday.strftime('%b').upper()}")
-    else:
-        date_range = (f"WEEK {week_num}  ·  "
-                      f"{week_monday.day} {week_monday.strftime('%b').upper()} – "
-                      f"{week_friday.day} {week_friday.strftime('%b').upper()}")
+    _draw_caps_label(c, "WEEKLY PLAN", MARGIN + CONTENT_W / 2, top - 22)
 
-    sep_y = draw_page_header(
-        c,
-        left_label=label,
-        left_sub=date_range,
-        accent_bar=True,
-    )
-    week_bm = f"week_{week_monday.isoformat()}"
-    # Day button always links to the Monday day page for this week
+    week_bm      = f"week_{week_monday.isoformat()}"
     first_day_bm = f"day_{week_monday.isoformat()}"
-    draw_nav_buttons(c, "week",
-                     month_bm=month_bookmark,
-                     week_bm=week_bm,
-                     day_bm=first_day_bm)
+    is_cur_week  = (week_monday <= today <= week_friday)
+    draw_nav_buttons(c, "week", month_bm=month_bookmark, week_bm=week_bm,
+                     day_bm=first_day_bm,
+                     omit=("week",) if is_cur_week else (),
+                     prev_bm=prev_week_bm, next_bm=next_week_bm)
 
-    # ── Grid geometry ────────────────────────────────────────────────────────
+    sep_y = top - 28
+    hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
+
+    # ── Sub-header: WEEK n · date range  + status pill ────────────────────────
+    sub_y = sep_y - 6 * mm
+    if week_monday.month == week_friday.month:
+        rng = (f"{week_monday.day}–{week_friday.day} "
+               f"{week_monday.strftime('%b').upper()}")
+    else:
+        rng = (f"{week_monday.day} {week_monday.strftime('%b').upper()} – "
+               f"{week_friday.day} {week_friday.strftime('%b').upper()}")
+    sub_label = f"WEEK {week_num}  ·  {rng}"
+    txt(c, MARGIN, sub_y, sub_label, size=8.5, bold=True, col=C_INK_2)
+
+    delta_w = (week_monday - _week_monday(today)).days // 7
+    pill = (("THIS WEEK", C_ACCENT) if delta_w == 0 else
+            ("NEXT WEEK", colors.HexColor("#3FA79F")) if delta_w == 1 else None)
+    if pill:
+        ptext, pcol = pill
+        psx = MARGIN + c.stringWidth(sub_label, "Helvetica-Bold", 8.5) + 4 * mm
+        psw = c.stringWidth(ptext, "Helvetica-Bold", 6.5) + 6 * mm
+        filled_rect(c, psx, sub_y - 1.6 * mm, psw, 5.0 * mm, fill=pcol, r=2.5)
+        txt(c, psx + psw / 2, sub_y - 0.1 * mm, ptext, size=6.5, bold=True,
+            col=C_WHITE, align="center")
+
+    # ── Geometry ──────────────────────────────────────────────────────────────
     TIME_COL_W = 12 * mm
     DAY_COL_W  = (CONTENT_W - TIME_COL_W) / 5
-    BOTTOM_H   = 72 * mm          # FOCUS + PRIORITIES + TO DO LIST + NOTES
-    DAY_HDR_H  = 16 * mm          # day-number header band height
+    DAY_HDR_H  = 13 * mm
+    BOTTOM_H   = 126 * mm
 
-    today = datetime.now(tz).date()
-    days  = [week_monday + timedelta(days=i) for i in range(5)]
+    days = [week_monday + timedelta(days=i) for i in range(5)]
 
-    # Pre-collect unique all-day events across the week
-    all_day_evts: list = []
-    _seen: set = set()
-    for day in days:
-        for e in days_events.get(day.strftime("%Y-%m-%d"), []):
-            if e.is_all_day and e.title not in _seen:
-                all_day_evts.append(e)
-                _seen.add(e.title)
-    n_allday   = min(len(all_day_evts), 3)
-    ALLDAY_H   = n_allday * 4.5 * mm   # zone between header sep and time grid
-
-    # Y coordinates (top-down)
-    hdr_top      = sep_y - 1 * mm         # top of day-number band
-    hdr_sep_y    = sep_y - DAY_HDR_H      # rule between header & all-day zone
-    time_grid_top = hdr_sep_y - ALLDAY_H  # top of timed grid proper
-    grid_bot     = MARGIN + BOTTOM_H
-    grid_h       = time_grid_top - grid_bot
-
+    hdr_top       = sub_y - 4 * mm
+    hdr_bot       = hdr_top - DAY_HDR_H
+    time_grid_top = hdr_bot
+    grid_bot      = MARGIN + BOTTOM_H
+    grid_h        = time_grid_top - grid_bot
     n_hours = HOUR_END - HOUR_START
     slot_h  = grid_h / n_hours
 
-    # ── Day column headers (number only, coloured dot) ───────────────────────
+    # ── Day-column header band (weekday + number) ─────────────────────────────
+    filled_rect(c, MARGIN + TIME_COL_W, hdr_bot,
+                CONTENT_W - TIME_COL_W, DAY_HDR_H, fill=C_WKND)
     for i, day in enumerate(days):
         cx    = MARGIN + TIME_COL_W + i * DAY_COL_W
+        cxm   = cx + DAY_COL_W / 2
         is_td = (day == today)
-
-        # Column separator (skip first)
-        if i > 0:
-            vrule(c, cx, grid_bot, time_grid_top + DAY_HDR_H + ALLDAY_H - grid_bot,
-                  col=C_GHOST, lw=0.4)
-
-        # Today column highlight (full height incl header)
+        # Today's column highlight (header + grid)
         if is_td:
-            filled_rect(c, cx, grid_bot,
-                        DAY_COL_W, time_grid_top + DAY_HDR_H + ALLDAY_H - grid_bot,
-                        fill=C_ACCENT_LT)
-
-        # Day number — large, centred, no abbreviation
-        num_col = C_ACCENT if is_td else C_INK
-        num_str = str(day.day)
-        num_cx  = cx + DAY_COL_W / 2
-        txt(c, num_cx, hdr_top - 11 * mm, num_str,
-            size=16, bold=True, col=num_col, align="center")
-
-        # Small coloured dot to upper-right of number (nav indicator)
-        nw = c.stringWidth(num_str, "Helvetica-Bold", 16)
-        dot_col = _event_color(day.strftime("%B"))   # consistent per month
-        circle(c, num_cx + nw / 2 + 2.5 * mm,
-               hdr_top - 6 * mm, 1.8 * mm, fill=dot_col)
-
-        # Tap the day number header to jump to that day's page
+            filled_rect(c, cx, grid_bot, DAY_COL_W,
+                        hdr_top - grid_bot, fill=C_ACCENT_LT)
+        if i > 0:
+            vrule(c, cx, grid_bot, hdr_top - grid_bot, col=C_GHOST, lw=0.4)
+        txt(c, cxm, hdr_top - 4 * mm, day.strftime("%a").upper(),
+            size=7, bold=True, col=C_GREY, align="center")
+        txt(c, cxm, hdr_top - 11 * mm, str(day.day),
+            size=15, bold=True, col=C_ACCENT if is_td else C_INK, align="center")
         c.linkAbsolute("", f"day_{day.isoformat()}",
-                       (cx, hdr_sep_y, cx + DAY_COL_W, hdr_top))
-
-    # Separator rule below day numbers
-    hrule(c, MARGIN + TIME_COL_W, hdr_sep_y, CONTENT_W - TIME_COL_W,
+                       (cx, hdr_bot, cx + DAY_COL_W, hdr_top))
+    hrule(c, MARGIN + TIME_COL_W, hdr_bot, CONTENT_W - TIME_COL_W,
           col=C_SILVER, lw=0.5)
-
-    # ── All-day event bands (full-width, stacked) ────────────────────────────
-    ad_bar_h = 6 * mm
-    for ai, ade in enumerate(all_day_evts):
-        bar_bot = hdr_sep_y - (ai + 1) * (ad_bar_h + 1 * mm)
-        filled_rect(c, MARGIN + TIME_COL_W, bar_bot,
-                    CONTENT_W - TIME_COL_W, ad_bar_h,
-                    fill=_event_color(ade.title), r=2)
-        txt(c, MARGIN + TIME_COL_W + 3 * mm, bar_bot + 2 * mm,
-            ade.title, size=8.5, bold=True, col=C_WHITE,
-            max_w=CONTENT_W - TIME_COL_W - 6 * mm)
 
     # ── Time grid ────────────────────────────────────────────────────────────
     for i in range(n_hours + 1):
         hour = HOUR_START + i
         y    = time_grid_top - i * slot_h
 
-        # Hour label — digit only, very faint, right-aligned into gutter
+        # Hour label (e.g. 7AM / 12PM / 6PM), right-aligned into the gutter
         if i < n_hours:
+            hr_lbl = ("12PM" if hour == 12 else
+                      f"{hour - 12}PM" if hour > 12 else f"{hour}AM")
             txt(c, MARGIN + TIME_COL_W - 1.5 * mm, y - 4,
-                str(hour), size=9, col=C_GREY, align="right")
+                hr_lbl, size=8, col=C_GREY, align="right")
 
         # Hour rule
         hrule(c, MARGIN + TIME_COL_W, y, CONTENT_W - TIME_COL_W,
@@ -1146,119 +1171,199 @@ def draw_week_page(c: canvas.Canvas,
                     c.linkAbsolute("", f"event_{evt.id}",
                                    (lx, bb, lx + lw, bt))
 
-    # ── Bottom sections ───────────────────────────────────────────────────────
-    _draw_bottom_sections(c, MARGIN, MARGIN + BOTTOM_H, CONTENT_W)
+    # ── Planning area (FOCUS·PRIORITIES / HABITS·WEEK STATS / TO DO·NOTES) ─────
+    stats = _week_meeting_stats(days, days_events, tz)
+    _draw_week_bottom(c, MARGIN, MARGIN + BOTTOM_H, CONTENT_W, stats, prev_stats)
 
 
-def _draw_bottom_sections(c: canvas.Canvas,
-                           x: float, top_y: float, width: float):
+_STAT_GREEN = colors.HexColor("#2E9E5B")
+
+
+def _week_meeting_stats(days, days_events, tz) -> dict:
+    """Timed-meeting tallies for a Mon–Fri week: count, total hours, per-day."""
+    per_day, total_h, n = [], 0.0, 0
+    for day in days:
+        dh = 0.0
+        for e in days_events.get(day.strftime("%Y-%m-%d"), []):
+            if e.is_all_day:
+                continue
+            dur = (e.end - e.start).total_seconds() / 3600.0
+            if dur <= 0:
+                continue
+            dh += dur; total_h += dur; n += 1
+        per_day.append(dh)
+    return {"n": n, "total_h": total_h, "per_day": per_day}
+
+
+def _stats_compare(cur_n: int, prev_stats: dict):
+    """(text, colour, direction) comparing this week's meeting count to last."""
+    prev_n = (prev_stats or {}).get("n", 0)
+    if not prev_stats or prev_n == 0:
+        return ("no data from last week", C_GREY, None)
+    if cur_n == prev_n:
+        return ("same as last week", C_GREY, None)
+    pct = round(abs(cur_n - prev_n) / prev_n * 100)
+    if cur_n < prev_n:
+        return (f"{pct}% less meetings vs last week", _STAT_GREEN, "down")
+    return (f"{pct}% more meetings vs last week", _STAT_GREEN, "up")
+
+
+def _draw_check(c, cx, cy, sz, col):
+    c.setStrokeColor(col); c.setLineWidth(1.0); c.setLineCap(1)
+    c.line(cx - sz * 0.4, cy, cx - sz * 0.05, cy - sz * 0.4)
+    c.line(cx - sz * 0.05, cy - sz * 0.4, cx + sz * 0.5, cy + sz * 0.5)
+    c.setLineCap(0)
+
+
+def _draw_tri(c, cx, cy, sz, col, up=False):
+    c.setFillColor(col)
+    p = c.beginPath()
+    if up:
+        p.moveTo(cx, cy + sz * 0.5)
+        p.lineTo(cx - sz * 0.45, cy - sz * 0.4)
+        p.lineTo(cx + sz * 0.45, cy - sz * 0.4)
+    else:
+        p.moveTo(cx, cy - sz * 0.5)
+        p.lineTo(cx - sz * 0.45, cy + sz * 0.4)
+        p.lineTo(cx + sz * 0.45, cy + sz * 0.4)
+    p.close()
+    c.drawPath(p, fill=1, stroke=0)
+
+
+def _fmt_hours(v: float) -> str:
+    return f"{v:.0f}h" if abs(v - round(v)) < 0.05 else f"{v:.1f}h"
+
+
+def _draw_week_bottom(c: canvas.Canvas, x: float, top_y: float, width: float,
+                      stats: dict, prev_stats: dict):
     """
-    Dayfolio-style bottom layout:
+    Three-row planning grid beneath the weekly time grid:
 
-      ┌──────────────────┬──────────────────────────────────────┐
-      │  FOCUS           │  PRIORITIES  (● 1  ● 2  ○ 3)        │
-      │  (vertical text) │  HABIT CHART (5-col mini grid)       │
-      ├──────────────────┴──────────────────────────────────────┤
-      │  TO DO LIST                │  NOTES                      │
-      └────────────────────────────┴─────────────────────────────┘
+      ┌ FOCUS (pink box) ──────┬ PRIORITIES (1·2·3) ───────────┐
+      ├ HABITS (S M T W T F S) ┼ WEEK STATS (+ mini bar chart) ┤
+      └ TO DO LIST ────────────┴ NOTES ────────────────────────┘
     """
-    bot     = MARGIN
-    total_h = top_y - bot
+    bot   = MARGIN
+    mid   = x + width / 2
+    pad   = 3 * mm
+    rose  = C_CUR_PILL
+    line_h = 7.0 * mm
 
-    # Row split: top 58% = FOCUS + PRIORITIES zone, bottom 42% = TO DO + NOTES
-    split_y  = bot + total_h * 0.42
-    top_h    = top_y - split_y
+    r1_bot = top_y - 30 * mm        # FOCUS / PRIORITIES band
+    r2_bot = r1_bot - 46 * mm       # HABITS / WEEK STATS band
 
-    FOCUS_W  = width * 0.37          # left portion of top row
-    PRIO_X   = x + FOCUS_W
-    PRIO_W   = width - FOCUS_W
+    # Boundary + divider lines
+    hrule(c, x, top_y,  width, col=C_SILVER, lw=0.6)
+    hrule(c, x, r1_bot, width, col=C_GHOST,  lw=0.5)
+    hrule(c, x, r2_bot, width, col=C_SILVER, lw=0.6)
+    vrule(c, mid, bot,    r2_bot - bot,      col=C_GHOST, lw=0.5)
+    vrule(c, mid, r2_bot, r1_bot - r2_bot,   col=C_GHOST, lw=0.5)
 
-    line_h   = 7.5 * mm              # ruled line spacing (comfortable for stylus)
-    circ_r   = 3.8 * mm              # priority circle radius
-
-    # ── Boundary rules ────────────────────────────────────────────────────────
-    hrule(c, x, top_y,  width, col=C_SILVER, lw=0.6)   # top edge
-    hrule(c, x, split_y, width, col=C_SILVER, lw=0.5)  # row divider
-
-    # ── Vertical dividers ─────────────────────────────────────────────────────
-    vrule(c, PRIO_X,        split_y, top_h,    col=C_GHOST, lw=0.5)  # FOCUS | PRIO
-    vrule(c, x + width / 2, bot,     split_y - bot, col=C_GHOST, lw=0.5)  # TODO | NOTES
-
-    # ── FOCUS — rotated vertical label, ruled lines ───────────────────────────
-    # "FOCUS" rotated 90° reading bottom→top, centred vertically in the zone
+    # ── Row 1 · FOCUS box ─────────────────────────────────────────────────────
+    fbx, fby = x + pad, r1_bot + 3 * mm
+    fbw, fbh = mid - pad - fbx, (top_y - 3 * mm) - (r1_bot + 3 * mm)
+    filled_rect(c, fbx, fby, fbw, fbh, fill=colors.HexColor("#F6DDE4"), r=3)
     c.saveState()
-    c.setFont("Helvetica-Bold", 9)
-    c.setFillColor(C_GREY)
-    c.translate(x + 4.5 * mm, (top_y + split_y) / 2)
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(colors.HexColor("#B06A80"))
+    c.translate(fbx + 4 * mm, fby + fbh / 2)
     c.rotate(90)
     c.drawCentredString(0, 0, "FOCUS")
     c.restoreState()
 
-    # Ruled lines in the FOCUS writing area
-    ly = top_y - 7.5 * mm
-    while ly > split_y + 2 * mm:
-        hrule(c, x + 9 * mm, ly, FOCUS_W - 11 * mm, col=C_GHOST, lw=0.5)
-        ly -= line_h
-
-    # ── PRIORITIES — numbered filled circles + writing lines ──────────────────
-    txt(c, PRIO_X + 3 * mm, top_y - 5 * mm, "PRIORITIES",
-        size=9, bold=True, col=C_GREY)
-
-    circ_cx = PRIO_X + 7 * mm
-    cy      = top_y - 13 * mm
+    # ── Row 1 · PRIORITIES ────────────────────────────────────────────────────
+    px = mid + pad
+    pw = x + width - px - pad
+    txt(c, px, top_y - 5 * mm, "PRIORITIES", size=9, bold=True, col=C_GREY)
+    cr = 3.2 * mm
+    cy = top_y - 12 * mm
     for n in range(1, 4):
-        if cy - circ_r < split_y + 3 * mm:
-            break
-        # Filled circle: first two solid accent, third outlined
-        if n <= 2:
-            circle(c, circ_cx, cy, circ_r, fill=C_ACCENT)
-            c.setFont("Helvetica-Bold", 8)
-            c.setFillColor(C_WHITE)
-        else:
-            circle(c, circ_cx, cy, circ_r,
-                   fill=C_GHOST, stroke=C_SILVER, lw=0.5)
-            c.setFont("Helvetica-Bold", 8)
-            c.setFillColor(C_SILVER)
-        c.drawCentredString(circ_cx, cy - 3, str(n))
-        # Ruled line beside circle
-        line_x = circ_cx + circ_r + 2 * mm
-        hrule(c, line_x, cy, PRIO_W - circ_r * 2 - 12 * mm,
+        circle(c, px + cr, cy, cr, fill=rose)
+        c.setFont("Helvetica-Bold", 7.5)
+        c.setFillColor(C_WHITE)
+        c.drawCentredString(px + cr, cy - 2.6, str(n))
+        hrule(c, px + 2 * cr + 2 * mm, cy - cr + 1 * mm,
+              pw - 2 * cr - 2 * mm, col=C_GHOST, lw=0.5)
+        cy -= 7 * mm
+
+    # ── Row 2 · HABITS ────────────────────────────────────────────────────────
+    txt(c, x + pad, r1_bot - 5 * mm, "HABITS", size=9, bold=True, col=C_GREY)
+    dow = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
+    hr_r, hr_gap = 1.7 * mm, 1.2 * mm
+    block_w = 7 * (2 * hr_r) + 6 * hr_gap
+    circ_x0 = mid - pad - block_w
+    hdr_y   = r1_bot - 9 * mm
+    for di, dn in enumerate(dow):
+        ccx = circ_x0 + hr_r + di * (2 * hr_r + hr_gap)
+        txt(c, ccx, hdr_y, dn, size=4.5, col=C_GREY, align="center")
+    n_rows  = 5
+    row_gap = (r1_bot - 12 * mm - (r2_bot + 2 * mm)) / n_rows
+    ry = r1_bot - 12 * mm - row_gap / 2
+    for _ in range(n_rows):
+        hrule(c, x + pad, ry - 1.5 * mm,
+              circ_x0 - hr_r - 2 * mm - (x + pad), col=C_GHOST, lw=0.5)
+        for di in range(7):
+            ccx = circ_x0 + hr_r + di * (2 * hr_r + hr_gap)
+            circle(c, ccx, ry, hr_r, fill=C_WHITE, stroke=C_SILVER, lw=0.5)
+        ry -= row_gap
+
+    # ── Row 2 · WEEK STATS ────────────────────────────────────────────────────
+    sx = mid + pad
+    sw = x + width - sx - pad
+    txt(c, sx, r1_bot - 5 * mm, "WEEK STATS", size=9, bold=True, col=C_GREY)
+    n, total_h = stats["n"], stats["total_h"]
+    sy = r1_bot - 11 * mm
+    if n == 0:
+        txt(c, sx, sy, "No events this week", size=7.5, italic=True, col=C_GREY)
+        sy -= 6 * mm
+    else:
+        txt(c, sx, sy, f"{n} invite{'s' if n != 1 else ''} · "
+            f"{_fmt_hours(total_h)} total", size=7.5, col=C_INK_2); sy -= 5.5 * mm
+        txt(c, sx, sy, f"{n} meeting{'s' if n != 1 else ''} · "
+            f"{_fmt_hours(total_h)}", size=7.5, col=C_INK_2); sy -= 5.5 * mm
+        _draw_check(c, sx + 1.3 * mm, sy + 1 * mm, 2.2 * mm, _STAT_GREEN)
+        txt(c, sx + 4 * mm, sy, f"{_fmt_hours(total_h)} accepted ({n})",
+            size=7.5, col=_STAT_GREEN); sy -= 6 * mm
+    cmp_text, cmp_col, direction = _stats_compare(n, prev_stats)
+    if direction:
+        _draw_tri(c, sx + 1.3 * mm, sy + 1 * mm, 2.2 * mm, cmp_col,
+                  up=(direction == "up"))
+        txt(c, sx + 4 * mm, sy, cmp_text, size=7.5, col=cmp_col)
+    else:
+        txt(c, sx, sy, cmp_text, size=7.5, italic=True, col=cmp_col)
+
+    # Mini bar chart of meeting-hours per weekday (Mon–Fri)
+    per = stats["per_day"]
+    if any(per):
+        labels = ["MON", "TUE", "WED", "THU", "FRI"]
+        ch_bot, ch_h = r2_bot + 6 * mm, 7 * mm
+        col_w = sw / 5
+        bw    = col_w * 0.46
+        mx    = max(per) or 1
+        for di in range(5):
+            colx = sx + di * col_w + (col_w - bw) / 2
+            bh   = (per[di] / mx) * ch_h
+            if bh > 0.3:
+                filled_rect(c, colx, ch_bot, bw, bh, fill=rose, r=1)
+            txt(c, colx + bw / 2, ch_bot - 3.5 * mm, labels[di],
+                size=4.5, col=C_SILVER, align="center")
+
+    # ── Row 3 · TO DO LIST | NOTES ────────────────────────────────────────────
+    txt(c, x + pad, r2_bot - 5 * mm, "TO DO LIST", size=9, bold=True, col=C_GREY)
+    cbr = 2.4 * mm
+    ty  = r2_bot - 11 * mm
+    while ty > bot + 2 * mm:
+        circle(c, x + pad + cbr, ty, cbr, fill=C_WHITE, stroke=C_SILVER, lw=0.5)
+        hrule(c, x + pad + 2 * cbr + 2 * mm, ty - cbr,
+              mid - pad - (x + pad + 2 * cbr + 2 * mm), col=C_GHOST, lw=0.5)
+        ty -= line_h
+
+    txt(c, mid + pad, r2_bot - 5 * mm, "NOTES", size=9, bold=True, col=C_GREY)
+    ny = r2_bot - 11 * mm
+    while ny > bot + 2 * mm:
+        hrule(c, mid + pad, ny, x + width - (mid + pad) - pad,
               col=C_GHOST, lw=0.5)
-        cy -= circ_r * 2 + 3 * mm
-
-    # ── HABIT CHART — 5-col mini grid below priorities ────────────────────────
-    if cy > split_y + 8 * mm:
-        txt(c, PRIO_X + 3 * mm, cy + 1.5 * mm, "HABIT CHART",
-            size=7.5, bold=True, col=C_SILVER)
-        cy -= 5 * mm
-        cell_sz  = 4 * mm
-        cell_gap = 0.8 * mm
-        grid_x   = PRIO_X + 3 * mm
-        row_y    = cy
-        while row_y > split_y + cell_sz + 1 * mm:
-            for ci in range(5):
-                cx2 = grid_x + ci * (cell_sz + cell_gap)
-                c.setStrokeColor(C_GHOST)
-                c.setLineWidth(0.5)
-                c.rect(cx2, row_y - cell_sz, cell_sz, cell_sz, fill=0, stroke=1)
-            row_y -= cell_sz + cell_gap
-
-    # ── TO DO LIST (bottom-left) ──────────────────────────────────────────────
-    txt(c, x + 2 * mm, split_y - 5 * mm, "TO DO LIST",
-        size=9, bold=True, col=C_GREY)
-    ly = split_y - 12 * mm
-    while ly > bot + 2 * mm:
-        hrule(c, x + 2 * mm, ly, width / 2 - 4 * mm, col=C_GHOST, lw=0.5)
-        ly -= line_h
-
-    # ── NOTES (bottom-right) ──────────────────────────────────────────────────
-    txt(c, x + width / 2 + 2 * mm, split_y - 5 * mm, "NOTES",
-        size=9, bold=True, col=C_GREY)
-    ly = split_y - 12 * mm
-    while ly > bot + 2 * mm:
-        hrule(c, x + width / 2 + 2 * mm, ly, width / 2 - 4 * mm,
-              col=C_GHOST, lw=0.5)
-        ly -= line_h
+        ny -= line_h
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1704,6 +1809,7 @@ def build_planner(
     while w <= last_mon:
         weeks.append(w)
         w += timedelta(days=7)
+    week_set = set(weeks)
 
     # Nav context: today + the set of bookmarks that actually exist, so the
     # top "jump to today" calendar buttons only link to real pages.
@@ -1824,9 +1930,20 @@ def build_planner(
                 ev_by_day.get((w + timedelta(days=i)).strftime("%Y-%m-%d"), [])
                 for i in range(5)
             }
-            # First day page for this week → day button target on week page
-            first_day_bm_week = f"day_{w.isoformat()}"
-            draw_week_page(c, w, wk_evts, event_pg, tz, month_bookmark=month_bm)
+            # Prev/next week stepper targets (only when those pages exist)
+            prev_w = w - timedelta(days=7)
+            next_w = w + timedelta(days=7)
+            prev_week_bm = f"week_{prev_w.isoformat()}" if prev_w in week_set else ""
+            next_week_bm = f"week_{next_w.isoformat()}" if next_w in week_set else ""
+            # Previous week's meeting stats → WEEK STATS comparison line
+            prev_days  = [prev_w + timedelta(days=i) for i in range(5)]
+            prev_evts  = {d.strftime("%Y-%m-%d"):
+                          ev_by_day.get(d.strftime("%Y-%m-%d"), [])
+                          for d in prev_days}
+            prev_stats = _week_meeting_stats(prev_days, prev_evts, tz)
+            draw_week_page(c, w, wk_evts, event_pg, tz, month_bookmark=month_bm,
+                           prev_week_bm=prev_week_bm, next_week_bm=next_week_bm,
+                           prev_stats=prev_stats)
             c.showPage()
 
             # Day pages (Mon–Fri)
