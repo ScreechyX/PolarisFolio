@@ -64,22 +64,13 @@ EVENT_PALETTE = [
     colors.HexColor("#D96040"),  # terra
 ]
 
-# Quarter-based tab palette (Dayfolio inspiration)
-#   Q1 Jan–Mar : teal        Q2 Apr–Jun : indigo
-#   Q3 Jul–Sep : rose        Q4 Oct–Dec : amber
-_Q = ["#5BBFBF", "#5BBFBF", "#5BBFBF",   # Q1
-      "#7986CB", "#7986CB", "#7986CB",   # Q2
-      "#E57080", "#E57080", "#E57080",   # Q3
-      "#E5A030", "#E5A030", "#E5A030"]   # Q4
-MONTH_TAB_COLORS = _Q   # index 0=Jan … 11=Dec
-
-# Year-overview page: per-month tab pastels (Jan→Dec) + accents
-YEAR_TAB_COLORS = [
+# Per-month tab palette (Jan→Dec) — used on every page's right-edge tab
+MONTH_TAB_COLORS = [
     "#5BBFBF", "#6FB0E0", "#9B9BD4", "#8E96D6", "#E2A0C0", "#E58B8B",
     "#E59A7A", "#E0B870", "#C9B98A", "#C99A7A", "#9AA8C0", "#8FB0A0",
 ]
-C_TODAY_NAVY = colors.HexColor("#1F3A5F")   # year-page today circle
-C_CUR_PILL   = colors.HexColor("#E0656F")   # year-page current-month pill
+C_TODAY_NAVY = colors.HexColor("#1F3A5F")   # overview today circle
+C_CUR_PILL   = colors.HexColor("#E0656F")   # current-month pill
 
 
 def _event_color(title: str) -> colors.Color:
@@ -89,6 +80,21 @@ def _event_color(title: str) -> colors.Color:
 
 def _week_monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
+
+
+def _fmt(dt, fmt: str) -> str:
+    """strftime with a portable %-d (no leading zero) on Windows + POSIX."""
+    return dt.strftime(fmt.replace("%-d", str(dt.day)))
+
+
+def _sunday_week_of_year(d: date) -> int:
+    """dayfo.io-style week number: Sunday-based weeks counted from 1 Jan
+    (Jan rows 1-5, Feb 6-9, …). A trailing week that rolls into the next
+    year is shown as that year's week 1."""
+    jan1_sun_idx = (date(d.year, 1, 1).weekday() + 1) % 7   # Sun=0..Sat=6
+    wk  = (d.timetuple().tm_yday + jan1_sun_idx - 1) // 7 + 1
+    sat = d + timedelta(days=(6 - (d.weekday() + 1) % 7))   # Sat of d's week
+    return 1 if sat.year > d.year else wk
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -370,7 +376,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
     for m in range(1, 13):
         y0 = PAGE_H - (m + 1) * seg_h
         _tab_label(y0, datetime(year, m, 1).strftime("%b").upper(),
-                   colors.HexColor(YEAR_TAB_COLORS[(m - 1) % 12]))
+                   colors.HexColor(MONTH_TAB_COLORS[(m - 1) % 12]))
         if active_months is None or m in active_months:
             mbm = f"month_{year}_{m:02d}"
             c.linkAbsolute("", mbm, (tab_x, y0, PAGE_W, y0 + seg_h))
@@ -407,10 +413,6 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
     ROW_H     = 6.0 * mm   # date row height
     N_ROWS    = 6          # max weeks shown (uniform across months)
     block_h   = NAME_OFFS + DOW_OFFS + GRID_OFFS + N_ROWS * ROW_H
-
-    # Sunday-based week-of-year numbering (matches dayfo.io: Jan rows 1-5,
-    # Feb 6-9, …). Sun=0..Sat=6 index of 1 Jan anchors the count.
-    jan1_sun_idx = (date(year, 1, 1).weekday() + 1) % 7
 
     for m in range(1, 13):
         row  = (m - 1) // 3
@@ -466,8 +468,7 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
             # Week number in the gutter
             sample = next((d for d in wk if d), None)
             if sample:
-                yday   = date(year, m, sample).timetuple().tm_yday
-                wk_num = (yday + jan1_sun_idx - 1) // 7 + 1
+                wk_num = _sunday_week_of_year(date(year, m, sample))
                 txt(c, cx0 + wk_w / 2, dy, str(wk_num),
                     size=5.5, col=C_SILVER, align="center")
 
@@ -574,11 +575,10 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
         row_y_top = dow_y - row * cell_h
         row_y_bot = row_y_top - cell_h
 
-        # Week number (ISO)
+        # Week number (Sunday-based, matching the year overview)
         if week[0] or week[-1]:
-            # Find any non-zero day to get the week number
             sample_day = next(d for d in week if d)
-            wk_num = date(year, month, sample_day).isocalendar()[1]
+            wk_num = _sunday_week_of_year(date(year, month, sample_day))
             txt(c, MARGIN + 1 * mm, row_y_bot + cell_h - 4 * mm,
                 str(wk_num), size=7, col=C_SILVER)
 
@@ -666,7 +666,7 @@ def draw_week_page(c: canvas.Canvas,
     """
     week_friday = week_monday + timedelta(days=4)
     month       = week_monday.month
-    week_num    = week_monday.isocalendar()[1]
+    week_num    = _sunday_week_of_year(week_monday)
 
     draw_tab(c, month, month_bookmark=month_bookmark)
 
@@ -994,7 +994,7 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
     draw_tab(c, month, month_bookmark=month_bookmark)
 
     # ── Header ────────────────────────────────────────────────────────────────
-    day_label = day_date.strftime("%A, %B %-d").upper()
+    day_label = _fmt(day_date, "%A, %B %-d").upper()
     year_label = str(day_date.year)
     is_today   = (day_date == today)
 
@@ -1262,7 +1262,7 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
 
     draw_tab(c, month, month_bookmark=f"month_{ls.year}_{ls.month:02d}")
 
-    day_label = ls.strftime("%A %-d %B %Y")
+    day_label = _fmt(ls, "%A %-d %B %Y")
 
     sep_y = draw_page_header(
         c,
@@ -1501,7 +1501,7 @@ def build_planner(
             c.bookmarkPage(week_bm)
             fri = w + timedelta(days=4)
             c.addOutlineEntry(
-                f"Week {w.isocalendar()[1]} · {w.strftime('%-d %b')} – {fri.strftime('%-d %b')}",
+                f"Week {_sunday_week_of_year(w)} · {_fmt(w, '%-d %b')} – {_fmt(fri, '%-d %b')}",
                 week_bm, level=1)
             wk_evts = {
                 (w + timedelta(days=i)).strftime("%Y-%m-%d"):
@@ -1524,7 +1524,7 @@ def build_planner(
                 d_bm  = f"day_{day_d.isoformat()}"
                 c.bookmarkPage(d_bm)
                 c.addOutlineEntry(
-                    f"  {day_d.strftime('%a %-d %b')}", d_bm, level=2)
+                    f"  {_fmt(day_d, '%a %-d %b')}", d_bm, level=2)
                 day_ev = ev_by_day.get(day_d.strftime("%Y-%m-%d"), [])
                 draw_day_page(c, day_d, day_ev, event_pg, tz,
                               week_bookmark=week_bm,
