@@ -1429,15 +1429,24 @@ def _draw_week_bottom(c: canvas.Canvas, x: float, top_y: float, width: float,
 # ─────────────────────────────────────────────────────────────────────────────
 
 _DAY_QUOTES = [
-    ("Write it on your heart that every day is the best day in the year.",
-     "Ralph Waldo Emerson"),
-    ("The secret of getting ahead is getting started.", "Mark Twain"),
-    ("Either you run the day or the day runs you.", "Jim Rohn"),
-    ("Today is the only day you own.", "Unknown"),
-    ("Do something today that your future self will thank you for.", "Unknown"),
-    ("One day or day one — you decide.", "Unknown"),
-    ("This is the day the Lord has made; let us rejoice and be glad in it.",
-     "Psalms 118:24"),
+    ("I love deadlines. I like the whooshing sound they make as they fly by.",
+     "Douglas Adams"),
+    ("People say nothing is impossible, but I do nothing every day.",
+     "A. A. Milne"),
+    ("Procrastination is the art of keeping up with yesterday.",
+     "Don Marquis"),
+    ("Never put off till tomorrow what you can do the day after tomorrow.",
+     "Mark Twain"),
+    ("The trouble with having an open mind is that people keep coming along "
+     "and putting things in it.", "Terry Pratchett"),
+    ("I can resist everything except temptation.", "Oscar Wilde"),
+    ("I'm writing a book. I've got the page numbers done.", "Steven Wright"),
+    ("Hard work never killed anybody, but why take the chance?",
+     "Edgar Bergen"),
+    ("I always arrive late at the office, but I make up for it by "
+     "leaving early.", "Charles Lamb"),
+    ("Doing nothing is very hard to do. You never know when you're finished.",
+     "Leslie Nielsen"),
 ]
 
 
@@ -1595,30 +1604,35 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
     pad     = 3 * mm
     line_h  = 7.5 * mm
 
-    # Quote
+    # Quote — wrap to the planning-panel width (measured at the render size)
     quote, author = _DAY_QUOTES[day_date.toordinal() % len(_DAY_QUOTES)]
-    quote_words = quote.split()
-    # Wrap into ~2 lines
-    qline1, qline2 = "", ""
-    for w in quote_words:
-        test = (qline1 + " " + w).strip()
-        if c.stringWidth(test, "Helvetica-Oblique", 6) < PLAN_W - 2 * pad:
-            qline1 = test
+    qx     = plan_x + pad + 3 * mm
+    max_w  = PLAN_W - pad - (qx - plan_x)
+    q_lines, cur = [], ""
+    for w in quote.split():
+        test = (cur + " " + w).strip()
+        if c.stringWidth(test, "Helvetica-Oblique", 9) <= max_w:
+            cur = test
         else:
-            qline2 = (qline2 + " " + w).strip()
+            if cur:
+                q_lines.append(cur)
+            cur = w
+    if cur:
+        q_lines.append(cur)
 
-    # Rose accent bar to the left of the quote
-    q_top = py - 4 * mm
-    q_bot = py - (19 if qline2 else 15) * mm - 1 * mm
-    filled_rect(c, plan_x + pad, q_bot, 2, q_top - q_bot, fill=C_CUR_PILL)
-    qx = plan_x + pad + 3 * mm
-    txt(c, qx, py - 6 * mm, qline1, size=9, italic=True, col=C_INK_2)
-    if qline2:
-        txt(c, qx, py - 12.5 * mm, qline2, size=9, italic=True, col=C_INK_2)
-    txt(c, qx, py - (19 if qline2 else 15) * mm,
-        f"— {author.upper()}", size=7, bold=True, col=C_CUR_PILL)
+    line_gap = 5.0 * mm
+    qy = py - 5 * mm
+    for ln in q_lines:
+        txt(c, qx, qy, ln, size=9, italic=True, col=C_INK_2)
+        qy -= line_gap
+    qy -= 1.0 * mm
+    txt(c, qx, qy, f"— {author.upper()}", size=7, bold=True, col=C_CUR_PILL)
 
-    py -= (20 if qline2 else 17) * mm
+    # Rose accent bar spanning the quote block
+    filled_rect(c, plan_x + pad, qy - 1.5 * mm, 2,
+                (py - 3 * mm) - (qy - 1.5 * mm), fill=C_CUR_PILL)
+
+    py = qy - 5 * mm
 
     # FOCUS box (solid pink, rotated label, no inner rules)
     FOCUS_H = 36 * mm
