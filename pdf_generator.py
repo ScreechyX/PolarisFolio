@@ -1659,14 +1659,6 @@ def build_planner(
     draw_year_page(c, year_val, day_week_map, active_months=active_months_set_int, tz=tz)
     c.showPage()
 
-    # Meetings agenda (second page) — list of all meetings, linked from the
-    # List nav button on every page.
-    c.bookmarkPage(MEETINGS_BM)
-    c.addOutlineEntry("Meetings", MEETINGS_BM, level=0)
-    draw_meetings_page(c, year_val, events, event_pg,
-                       active_months=active_months_set_int, tz=tz)
-    c.showPage()
-
     for year, month in months:
         # Month overview
         month_bm = f"month_{year}_{month:02d}"
@@ -1720,6 +1712,14 @@ def build_planner(
                 draw_meeting_page(c, e, event_wk_bm[e.id], tz=tz,
                                   day_bookmark=event_day_bm.get(e.id, ""))
                 c.showPage()
+
+    # Meetings agenda (very last page) — list of all meetings, linked from the
+    # List nav button on every page.
+    c.bookmarkPage(MEETINGS_BM)
+    c.addOutlineEntry("Meetings", MEETINGS_BM, level=0)
+    draw_meetings_page(c, year_val, events, event_pg,
+                       active_months=active_months_set_int, tz=tz)
+    c.showPage()
 
     c.save()
     print(f"PDF saved: {output_path}")
