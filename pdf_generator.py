@@ -172,6 +172,7 @@ def circle(c: canvas.Canvas, cx, cy, r, fill, stroke=None, lw=0.5):
 # ─────────────────────────────────────────────────────────────────────────────
 
 YEAR_BM = "year_overview"   # bookmark for the year overview page
+MEETINGS_BM = "meetings"    # bookmark for the meetings agenda page
 
 C_WHITE = colors.white      # convenience alias used in nav icon drawing
 
@@ -231,12 +232,15 @@ _NAV_TODAY = None              # date
 _NAV_VALID_BMS: set = set()    # bookmark names that exist in this PDF
 
 
-def draw_nav_buttons(c: canvas.Canvas, active: str, **_legacy):
+def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
+                     **_legacy):
     """
     Top-right navigation: Year (grid) · Month · Week · Day · List.
     Month/Week/Day are labelled tear-off calendar buttons showing TODAY
     (e.g. JUN / W24 / 13) that jump to today's pages when those pages exist.
+    The List button jumps to the meetings agenda page.
     `active` highlights the current page type in the accent colour.
+    `omit_year` drops the leading grid button (used on the year page itself).
     """
     today = _NAV_TODAY or date.today()
     valid = _NAV_VALID_BMS
@@ -249,8 +253,10 @@ def draw_nav_buttons(c: canvas.Canvas, active: str, **_legacy):
         ("month", "cal",  today.strftime("%b").upper(),    f"month_{today.year}_{today.month:02d}"),
         ("week",  "cal",  f"W{wk}",                        f"week_{mon.isoformat()}"),
         ("day",   "cal",  str(today.day),                  f"day_{today.isoformat()}"),
-        ("list",  "list", "",                              ""),
+        ("list",  "list", "",                              MEETINGS_BM),
     ]
+    if omit_year:
+        buttons = [b for b in buttons if b[0] != "year"]
 
     BH    = 6.5 * mm
     BW_C  = 9.0 * mm      # labelled calendar button
@@ -363,18 +369,11 @@ def draw_page_header(c: canvas.Canvas,
 
 _MINI_DOW = ["S", "M", "T", "W", "T", "F", "S"]
 
-def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
-                   active_months: set = None, tz=timezone.utc):
-    """
-    Full-year calendar: 3-col × 4-row mini-month grid.
-    All 12 month tabs are shown as equal-height segments on the right edge.
-    Each tab segment links to that month's overview page.
-    Each date cell links to its weekly spread.
-    Today is circled; the current month name gets a colour pill badge.
-    """
-    today = datetime.now(tz).date()
 
-    # ── Right-edge tabs: "year" cap + 12 labeled month segments ───────────────
+def _draw_year_edge_tabs(c: canvas.Canvas, year: int, active_months: set = None):
+    """Right-edge tab stack: a "year" cap + 12 labelled month segments.
+    Each month segment links to that month's overview page (when it exists).
+    Shared by the year overview and meetings agenda pages."""
     tab_x = PAGE_W - TAB_W
     n_seg = 13                       # 1 year cap + 12 months
     seg_h = PAGE_H / n_seg
@@ -402,6 +401,21 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
             c.linkAbsolute("", mbm, (tab_x, y0, PAGE_W, y0 + seg_h))
     vrule(c, tab_x, 0, PAGE_H, col=colors.HexColor("#00000018"), lw=0.5)
 
+
+def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
+                   active_months: set = None, tz=timezone.utc):
+    """
+    Full-year calendar: 3-col × 4-row mini-month grid.
+    All 12 month tabs are shown as equal-height segments on the right edge.
+    Each tab segment links to that month's overview page.
+    Each date cell links to its weekly spread.
+    Today is circled; the current month name gets a colour pill badge.
+    """
+    today = datetime.now(tz).date()
+
+    # ── Right-edge tabs: "year" cap + 12 labeled month segments ───────────────
+    _draw_year_edge_tabs(c, year, active_months=active_months)
+
     # ── Page header ───────────────────────────────────────────────────────────
     top = PAGE_H - MARGIN
     # "2026" bold + "CALENDAR" light
@@ -416,7 +430,8 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
     sep_y = top - 26
     hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
 
-    draw_nav_buttons(c, "year")
+    # Year page shows only Month · Week · Day · List (no leading grid button)
+    draw_nav_buttons(c, "year", omit_year=True)
 
     # ── Mini-month grid ───────────────────────────────────────────────────────
     COL_GAP  = 5 * mm
@@ -515,6 +530,134 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
                     c.linkAbsolute("", day_week_map[day_key],
                                    (dx - day_w / 2, ry - ROW_H / 2,
                                     dx + day_w / 2, ry + ROW_H / 2))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Meetings agenda page
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _draw_person_glyph(c: canvas.Canvas, cx, cy, sz, col):
+    """Tiny attendee/person symbol — head dot above rounded shoulders."""
+    c.setFillColor(col)
+    c.circle(cx, cy + sz * 0.30, sz * 0.26, fill=1, stroke=0)
+    bw, bh = sz * 0.78, sz * 0.40
+    c.roundRect(cx - bw / 2, cy - sz * 0.42, bw, bh, bh / 2, fill=1, stroke=0)
+
+
+def draw_meetings_page(c: canvas.Canvas, year: int, events: list,
+                       event_page_map: dict,
+                       active_months: set = None, tz=timezone.utc):
+    """
+    Agenda-style list of all meetings, grouped by month with a coloured month
+    header. Events flow down the left column then the right column. Each row
+    taps through to that meeting's note page. Reachable from the List nav
+    button on every page.
+    """
+    # ── Right-edge tabs (same stack as the year page) ─────────────────────────
+    _draw_year_edge_tabs(c, year, active_months=active_months)
+
+    # ── Header: list glyph + "MEETINGS" ───────────────────────────────────────
+    top = PAGE_H - MARGIN
+    _draw_list_icon(c, MARGIN + 3 * mm, top - 8, 6.5 * mm, C_INK)
+    c.setFont("Helvetica-Bold", 15)
+    c.setFillColor(C_INK)
+    c.drawString(MARGIN + 9 * mm, top - 11, "MEETINGS")
+
+    sep_y = top - 26
+    hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
+
+    draw_nav_buttons(c, "list")
+
+    # ── Two-column agenda layout ──────────────────────────────────────────────
+    COL_GAP = 6 * mm
+    col_w   = (CONTENT_W - COL_GAP) / 2
+    col_x   = [MARGIN, MARGIN + col_w + COL_GAP]
+    col_top = sep_y - 6 * mm
+    col_bot = MARGIN
+    vrule(c, MARGIN + col_w + COL_GAP / 2, col_bot, col_top - col_bot,
+          col=C_GHOST, lw=0.5)
+
+    meetings = sorted([e for e in events if not e.is_all_day],
+                      key=lambda e: e.start)
+
+    if not meetings:
+        txt(c, MARGIN, col_top - 6 * mm, "No meetings scheduled.",
+            size=9, italic=True, col=C_GREY)
+        return
+
+    # Group by (year, month) preserving chronological order
+    from collections import OrderedDict
+    groups: "OrderedDict[tuple, list]" = OrderedDict()
+    for e in meetings:
+        loc = e.start.astimezone(tz)
+        groups.setdefault((loc.year, loc.month), []).append(e)
+
+    HDR_H = 7 * mm
+    ROW_H = 9 * mm
+
+    ci = 0           # current column index
+    y  = col_top
+
+    def _advance_if_needed(h: float) -> bool:
+        """Ensure `h` of vertical room; spill to the next column if not.
+        Returns False once we run out of columns."""
+        nonlocal ci, y
+        if y - h < col_bot:
+            ci += 1
+            y = col_top
+        return ci < 2
+
+    for (yr, mo), evs in groups.items():
+        # Keep a month header with at least its first row (avoid orphan header)
+        if not _advance_if_needed(HDR_H + ROW_H):
+            break
+        x = col_x[ci]
+        mname = datetime(yr, mo, 1).strftime("%B %Y").upper()
+        pill_col = colors.HexColor(MONTH_TAB_COLORS[(mo - 1) % 12])
+        filled_rect(c, x, y - HDR_H + 1 * mm, col_w, HDR_H - 1 * mm,
+                    fill=pill_col, r=2)
+        circle(c, x + 3 * mm, y - HDR_H / 2 + 0.5 * mm, 1.2 * mm, fill=C_WHITE)
+        txt(c, x + 6 * mm, y - HDR_H + 3.2 * mm, mname,
+            size=8, bold=True, col=C_WHITE)
+        y -= HDR_H + 2 * mm
+
+        for e in evs:
+            if not _advance_if_needed(ROW_H):
+                break
+            x   = col_x[ci]
+            loc = e.start.astimezone(tz)
+
+            # Accent stripe on the left of the row
+            filled_rect(c, x, y - ROW_H + 1.5 * mm, 1.5, ROW_H - 2 * mm,
+                        fill=_event_color(e.title))
+            # Day number + weekday
+            txt(c, x + 3 * mm, y - 3.8 * mm, str(loc.day),
+                size=10, bold=True, col=C_INK)
+            txt(c, x + 3 * mm, y - 7.2 * mm, loc.strftime("%a").upper(),
+                size=6, col=C_GREY)
+            # Time · duration
+            txt(c, x + 11 * mm, y - 7 * mm,
+                f"{loc.strftime('%H:%M')} · {e.duration_str}",
+                size=6, col=C_GREY)
+            # Title
+            txt(c, x + 11 * mm, y - 3.8 * mm, e.title, size=9, bold=True,
+                col=C_INK, max_w=col_w - 26 * mm)
+            # Attendee count
+            if e.attendees:
+                cnt = str(len(e.attendees))
+                _draw_person_glyph(c, x + col_w - 7 * mm, y - 4.5 * mm,
+                                   3 * mm, C_GREY)
+                txt(c, x + col_w - 4.5 * mm, y - 5.5 * mm, cnt,
+                    size=7, col=C_GREY)
+            # Tap → meeting note page (when one exists for this event)
+            if e.id in event_page_map:
+                c.linkAbsolute("", f"event_{e.id}",
+                               (x, y - ROW_H, x + col_w, y))
+            # Row divider
+            hrule(c, x + 3 * mm, y - ROW_H + 0.5 * mm, col_w - 3 * mm,
+                  col=C_GHOST, lw=0.3)
+            y -= ROW_H
+        y -= 2 * mm
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1427,7 +1570,7 @@ def build_planner(
     # top "jump to today" calendar buttons only link to real pages.
     global _NAV_TODAY, _NAV_VALID_BMS
     _NAV_TODAY = datetime.now(tz).date()
-    _NAV_VALID_BMS = {YEAR_BM}
+    _NAV_VALID_BMS = {YEAR_BM, MEETINGS_BM}
     _NAV_VALID_BMS |= {f"month_{y}_{m:02d}" for (y, m) in months}
     _NAV_VALID_BMS |= {f"week_{wm.isoformat()}" for wm in weeks}
     _NAV_VALID_BMS |= {f"day_{(wm + timedelta(days=i)).isoformat()}"
@@ -1514,6 +1657,14 @@ def build_planner(
     c.addOutlineEntry(str(year_val), YEAR_BM, level=0)
     active_months_set_int = {month for (yr, month) in months if yr == year_val}
     draw_year_page(c, year_val, day_week_map, active_months=active_months_set_int, tz=tz)
+    c.showPage()
+
+    # Meetings agenda (second page) — list of all meetings, linked from the
+    # List nav button on every page.
+    c.bookmarkPage(MEETINGS_BM)
+    c.addOutlineEntry("Meetings", MEETINGS_BM, level=0)
+    draw_meetings_page(c, year_val, events, event_pg,
+                       active_months=active_months_set_int, tz=tz)
     c.showPage()
 
     for year, month in months:
