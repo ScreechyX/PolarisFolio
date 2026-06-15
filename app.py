@@ -253,10 +253,14 @@ async def auth_callback(request: Request, code: str = None, error: str = None):
     os.unlink(flow_file)
 
     if "access_token" in result:
-        # Save display name
-        name = result.get("id_token_claims", {}).get("name", "")
+        # Save display name + account email (for the "you" chip on meeting pages)
+        claims = result.get("id_token_claims", {})
+        name = claims.get("name", "")
         if name:
             await set_setting("ms_user_name", name)
+        email = claims.get("preferred_username", "") or claims.get("email", "")
+        if email:
+            await set_setting("ms_user_email", email)
         return RedirectResponse("/settings?success=microsoft_connected")
 
     return RedirectResponse(f"/settings?error=auth_failed")
@@ -404,6 +408,7 @@ async def _run_generation(
     display_name = f"PolarisFolio {start.strftime('%b %Y')}"
     filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}.pdf"
     pdf_path = os.path.join(PDF_DIR, filename)
+    self_email = await get_setting("ms_user_email", "")
     build_planner(
         events=events,
         output_path=pdf_path,
@@ -411,6 +416,7 @@ async def _run_generation(
         end_date=end,
         title=display_name,
         timezone_name=tz_name,
+        self_email=self_email or None,
     )
 
     # Save to history immediately so the UI stops spinning

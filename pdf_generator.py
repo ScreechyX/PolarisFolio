@@ -255,6 +255,20 @@ def _draw_caps_label(c: canvas.Canvas, text: str, cx: float, baseline_y: float,
     c.restoreState()
 
 
+def _caps_left(c: canvas.Canvas, text: str, x: float, baseline_y: float,
+               size: float = 8, col=None, cs: float = 1.2):
+    """Left-aligned, letter-spaced uppercase section label."""
+    c.saveState()
+    to = c.beginText()
+    to.setFont("Helvetica-Bold", size)
+    to.setFillColor(col if col is not None else C_GREY)
+    to.setCharSpace(cs)
+    to.setTextOrigin(x, baseline_y)
+    to.textOut(text)
+    c.drawText(to)
+    c.restoreState()
+
+
 def _draw_cal_button(c: canvas.Canvas, cx, cy, bw, bh, label, col):
     """Tear-off calendar glyph (two rings on top) with a centred label."""
     x = cx - bw / 2
@@ -285,18 +299,20 @@ _NAV_VALID_BMS: set = set()    # bookmark names that exist in this PDF
 
 
 def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
-                     omit=(), prev_bm: str = "", next_bm: str = "", **_legacy):
+                     omit=(), prev_bm: str = "", next_bm: str = "",
+                     ctx_date: date = None, **_legacy):
     """
     Top-right navigation: Year (grid) · Month · Week · Day · List.
-    Month/Week/Day are labelled tear-off calendar buttons showing TODAY
-    (e.g. JUN / W24 / 13) that jump to today's pages when those pages exist.
+    Month/Week/Day are labelled tear-off calendar buttons that jump to a
+    reference date's pages — TODAY by default, or `ctx_date` (e.g. a meeting's
+    own date on the meeting note page).
     The List button jumps to the meetings agenda page.
     `active` highlights the current page type in the accent colour.
     `omit` is a collection of button names to drop (e.g. "year" on the year
     page, "month" on the current-month page — they would only link to self).
     `prev_bm`/`next_bm` add ‹ › arrows that step to the adjacent week/day page.
     """
-    today = _NAV_TODAY or date.today()
+    today = ctx_date or _NAV_TODAY or date.today()
     valid = _NAV_VALID_BMS
     wk    = _sunday_week_of_year(today)
     mon   = _week_monday(today)
@@ -1383,6 +1399,20 @@ _DAY_QUOTES = [
 ]
 
 
+def _relative_day_pill(target: date, today: date):
+    """(label, colour) describing target relative to today, or None.
+    TODAY/TOMORROW/YESTERDAY take precedence over THIS/LAST/NEXT WEEK."""
+    dd = (target - today).days
+    dw = (_week_monday(target) - _week_monday(today)).days // 7
+    if dd == 0:  return ("TODAY",     C_TODAY_NAVY)
+    if dd == 1:  return ("TOMORROW",  colors.HexColor("#2E9E5B"))
+    if dd == -1: return ("YESTERDAY", colors.HexColor("#E08A3C"))
+    if dw == 0:  return ("THIS WEEK", C_ACCENT)
+    if dw == -1: return ("LAST WEEK", colors.HexColor("#9AA0A6"))
+    if dw == 1:  return ("NEXT WEEK", colors.HexColor("#3FA79F"))
+    return None
+
+
 def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
                   event_page_map: dict, tz,
                   week_bookmark: str = "", month_bookmark: str = "",
@@ -1427,15 +1457,7 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
     day_label = _fmt(day_date, "%A, %B %-d").upper()
     txt(c, MARGIN, sub_y, day_label, size=10.5, bold=True, col=C_INK)
 
-    delta_days  = (day_date - today).days
-    delta_weeks = (_week_monday(day_date) - _week_monday(today)).days // 7
-    if   delta_days == 0:   pill = ("TODAY",     C_TODAY_NAVY)
-    elif delta_days == 1:   pill = ("TOMORROW",  colors.HexColor("#2E9E5B"))
-    elif delta_days == -1:  pill = ("YESTERDAY", colors.HexColor("#E08A3C"))
-    elif delta_weeks == 0:  pill = ("THIS WEEK", C_ACCENT)
-    elif delta_weeks == -1: pill = ("LAST WEEK", colors.HexColor("#9AA0A6"))
-    elif delta_weeks == 1:  pill = ("NEXT WEEK", colors.HexColor("#3FA79F"))
-    else:                   pill = None
+    pill = _relative_day_pill(day_date, today)
     if pill:
         ptext, pcol = pill
         psx = MARGIN + c.stringWidth(day_label, "Helvetica-Bold", 10.5) + 4 * mm
@@ -1661,110 +1683,133 @@ def _strip_teams_boilerplate(text: str) -> str:
 
 
 def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
-                      week_bookmark: str, tz=None, day_bookmark: str = ""):
+                      week_bookmark: str, tz=None, day_bookmark: str = "",
+                      self_email: str = None):
     tz  = tz or timezone.utc
     ls  = event.start.astimezone(tz)
-    month = ls.month
+    le  = event.end.astimezone(tz)
+    year, month = ls.year, ls.month
+    today = datetime.now(tz).date()
+    rose  = C_CUR_PILL
 
-    draw_tab(c, month, month_bookmark=f"month_{ls.year}_{ls.month:02d}")
+    # Right-edge month tab stack with the meeting's month highlighted
+    active = {m for m in range(1, 13)
+              if f"month_{year}_{m:02d}" in _NAV_VALID_BMS}
+    _draw_year_edge_tabs(c, year, active_months=active or None,
+                         active_month=month)
 
-    day_label = _fmt(ls, "%A %-d %B %Y")
+    top = PAGE_H - MARGIN
 
-    sep_y = draw_page_header(
-        c,
-        left_label=event.title,
-        left_sub=day_label,
-        accent_bar=True,
-    )
+    # ── Header pills: MEETING NOTES + relative-time pill ──────────────────────
+    def _pill(x, text, col):
+        pw = c.stringWidth(text, "Helvetica-Bold", 6.5) + 6 * mm
+        filled_rect(c, x, top - 12, pw, 5.2 * mm, fill=col, r=2.6)
+        txt(c, x + pw / 2, top - 10.3, text, size=6.5, bold=True,
+            col=C_WHITE, align="center")
+        return x + pw + 2 * mm
+    plx = _pill(MARGIN, "MEETING NOTES", rose)
+    rp = _relative_day_pill(ls.date(), today)
+    if rp:
+        _pill(plx, rp[0], rp[1])
 
-    month_bm = f"month_{ls.year}_{ls.month:02d}"
-    day_bm   = day_bookmark or f"day_{ls.date().isoformat()}"
-    draw_nav_buttons(c, "day", month_bm=month_bm, week_bm=week_bookmark, day_bm=day_bm)
+    # Nav points at the meeting's own month/week/day (ctx_date)
+    day_bm = day_bookmark or f"day_{ls.date().isoformat()}"
+    draw_nav_buttons(c, "", month_bm=f"month_{year}_{month:02d}",
+                     week_bm=week_bookmark, day_bm=day_bm, ctx_date=ls.date())
 
-    y = sep_y - 6 * mm
+    # ── Title row: event-colour marker + title ────────────────────────────────
+    ty = top - 26
+    filled_rect(c, MARGIN, ty - 1 * mm, 4 * mm, 4 * mm,
+                fill=_event_color(event.title), r=1.2)
+    c.setFont("Helvetica-Bold", 16)
+    c.setFillColor(C_INK)
+    c.drawString(MARGIN + 6 * mm, ty, event.title)
 
-    # ── Metadata chips ────────────────────────────────────────────────────────
-    meta = [("Duration", event.duration_str)]
-    if event.location:      meta.append(("Location", event.location))
-    if event.calendar_name: meta.append(("Calendar", event.calendar_name))
+    # Subline: date · time–time · duration
+    date_str = _fmt(ls, "%A, %B %-d, %Y").upper()
+    if event.is_all_day:
+        sub = f"{date_str}   ·   All day"
+    else:
+        sub = (f"{date_str}   ·   {ls.hour}:{ls.minute:02d} – "
+               f"{le.hour}:{le.minute:02d}   ·   {event.duration_str}")
+    txt(c, MARGIN, ty - 6.5 * mm, sub, size=8, col=C_GREY)
 
-    chip_x = MARGIN
-    chip_h = 6 * mm
-    chip_pad = 3 * mm
-    for lbl, val in meta:
-        text     = f"{lbl}: {val}"
-        font     = "Helvetica"
-        chip_w   = c.stringWidth(text, font, 7) + 2 * chip_pad
-        if chip_x + chip_w > MARGIN + CONTENT_W:
-            chip_x = MARGIN; y -= chip_h + 2.5 * mm
-        filled_rect(c, chip_x, y - chip_h, chip_w, chip_h,
-                    fill=C_ACCENT_LT, r=3)
-        c.setFont(font, 7)
-        c.setFillColor(C_INK_2)
-        c.drawString(chip_x + chip_pad, y - chip_h + 1.8 * mm, text)
-        chip_x += chip_w + 2 * mm
+    y = ty - 11 * mm
+    hrule(c, MARGIN, y, CONTENT_W, col=rose, lw=0.8)
+    y -= 6 * mm
 
-    y -= chip_h + 6 * mm
+    # Reserve an ACTION ITEMS block at the bottom
+    AI_ROWS   = 5
+    ai_line_h = 7.2 * mm
+    ai_label_y = MARGIN + AI_ROWS * ai_line_h + 2 * mm
 
-    # ── Attendees ─────────────────────────────────────────────────────────────
+    # ── ATTENDEES ─────────────────────────────────────────────────────────────
     if event.attendees:
-        hrule(c, MARGIN, y, CONTENT_W, col=C_GHOST, lw=0.6)
-        y -= 5 * mm
-        txt(c, MARGIN, y, "Attendees", size=9, bold=True, col=C_INK_2)
+        _caps_left(c, f"ATTENDEES ({len(event.attendees)})", MARGIN, y)
         y -= 6 * mm
-
         _RESP = {
             "accepted":  colors.HexColor("#4CAF50"),
             "tentative": colors.HexColor("#FF9800"),
             "declined":  colors.HexColor("#F44336"),
         }
-        att_x = MARGIN
         for att in event.attendees:
-            label = att.name or att.email
-            dot_c = _RESP.get(att.response, C_SILVER)
-            aw = c.stringWidth(label, "Helvetica", 8) + 8 * mm
-            if att_x + aw > MARGIN + CONTENT_W:
-                att_x = MARGIN; y -= 6 * mm
-            circle(c, att_x + 1.5 * mm, y + 2 * mm, 1.8 * mm, fill=dot_c)
-            txt(c, att_x + 5 * mm, y, label, size=8, col=C_INK_2)
-            att_x += aw + 3 * mm
-        y -= 8 * mm
+            if y < ai_label_y + 30 * mm:
+                break
+            name = att.name or att.email
+            ring = _RESP.get(att.response, C_SILVER)
+            circle(c, MARGIN + 1.7 * mm, y + 1 * mm, 1.7 * mm,
+                   fill=C_WHITE, stroke=ring, lw=0.9)
+            txt(c, MARGIN + 5.5 * mm, y, name, size=8, col=C_INK_2)
+            if self_email and att.email and att.email.lower() == self_email.lower():
+                nw = c.stringWidth(name, "Helvetica", 8)
+                chx = MARGIN + 5.5 * mm + nw + 2 * mm
+                cw  = c.stringWidth("you", "Helvetica", 6) + 3 * mm
+                filled_rect(c, chx, y - 0.6 * mm, cw, 3.8 * mm,
+                            fill=C_ACCENT_LT, r=1.6)
+                txt(c, chx + cw / 2, y, "you", size=6, col=C_INK_2, align="center")
+            y -= 5 * mm
+        y -= 2 * mm
+        hrule(c, MARGIN, y, CONTENT_W, col=rose, lw=0.8)
+        y -= 6 * mm
 
-    # ── Agenda / description ──────────────────────────────────────────────────
-    agenda = _strip_teams_boilerplate(event.description)
-    if agenda:
-        hrule(c, MARGIN, y, CONTENT_W, col=C_GHOST, lw=0.6)
-        y -= 5 * mm
-        txt(c, MARGIN, y, "Agenda", size=9, bold=True, col=C_INK_2)
-        y -= 7 * mm
-        words = agenda.split()
-        line  = ""
+    # ── DESCRIPTION ───────────────────────────────────────────────────────────
+    desc = _strip_teams_boilerplate(event.description)
+    if desc:
+        _caps_left(c, "DESCRIPTION", MARGIN, y)
+        y -= 6 * mm
+        words, line, n_lines = desc.split(), "", 0
         for word in words:
             test = (line + " " + word).strip()
             if c.stringWidth(test, "Helvetica", 8.5) < CONTENT_W:
                 line = test
             else:
-                if y < MARGIN + 40 * mm: break
                 txt(c, MARGIN, y, line, size=8.5, col=C_INK_2)
-                y -= 6 * mm; line = word
-        if line and y > MARGIN + 40 * mm:
+                y -= 5.5 * mm; line = word; n_lines += 1
+                if n_lines >= 6:
+                    line = ""; break
+        if line:
             txt(c, MARGIN, y, line, size=8.5, col=C_INK_2)
-            y -= 9 * mm
+            y -= 5.5 * mm
+        y -= 2 * mm
+        hrule(c, MARGIN, y, CONTENT_W, col=rose, lw=0.8)
+        y -= 6 * mm
 
-    # ── Notes section ─────────────────────────────────────────────────────────
-    hrule(c, MARGIN, y, CONTENT_W, col=C_SILVER, lw=0.6)
-    y -= 5 * mm
-    txt(c, MARGIN, y, "Notes", size=9, bold=True, col=C_INK_2)
-
-    # Accent bar to the left of the writing area
-    filled_rect(c, MARGIN, MARGIN, 2, y - 4 * mm - MARGIN,
-                fill=colors.HexColor(MONTH_TAB_COLORS[(event.start.astimezone(tz).month - 1)]))
-
+    # ── NOTES (large ruled writing area) ──────────────────────────────────────
+    _caps_left(c, "NOTES", MARGIN, y)
     y -= 9 * mm
-    while y > MARGIN + 6 * mm:
-        hrule(c, MARGIN + 4 * mm, y, CONTENT_W - 4 * mm,
-              col=C_GHOST, lw=0.5)
+    while y > ai_label_y + 6 * mm:
+        hrule(c, MARGIN, y, CONTENT_W, col=C_GHOST, lw=0.5)
         y -= 9 * mm
+
+    # ── ACTION ITEMS (checkbox rows at the bottom) ────────────────────────────
+    _caps_left(c, "ACTION ITEMS", MARGIN, ai_label_y)
+    ar = 2.4 * mm
+    ay = ai_label_y - 6 * mm
+    for _ in range(AI_ROWS):
+        circle(c, MARGIN + ar, ay, ar, fill=C_WHITE, stroke=C_SILVER, lw=0.6)
+        hrule(c, MARGIN + 2 * ar + 2 * mm, ay - ar,
+              CONTENT_W - (2 * ar + 2 * mm), col=C_GHOST, lw=0.5)
+        ay -= ai_line_h
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1778,6 +1823,7 @@ def build_planner(
     end_date:   date = None,
     title:      str  = "Planner",
     timezone_name: str = "UTC",
+    self_email: str = None,
 ):
     """
     Builds the hyperlinked PDF.
@@ -1986,7 +2032,8 @@ def build_planner(
                 c.bookmarkPage(event_bm)
                 c.addOutlineEntry(f"    {e.title[:40]}", event_bm, level=3)
                 draw_meeting_page(c, e, event_wk_bm[e.id], tz=tz,
-                                  day_bookmark=event_day_bm.get(e.id, ""))
+                                  day_bookmark=event_day_bm.get(e.id, ""),
+                                  self_email=self_email)
                 c.showPage()
 
     # Meetings agenda (very last page) — list of all meetings, linked from the
