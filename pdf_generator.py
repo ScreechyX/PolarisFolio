@@ -709,7 +709,8 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                     events: list,
                     day_week_map: dict,
                     tz=timezone.utc,
-                    active_months: set = None):
+                    active_months: set = None,
+                    event_page_map: dict = None):
     """
     Full-page monthly calendar grid (Dayfolio style).
 
@@ -767,12 +768,31 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
     sep_y = top - 28
     hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
 
-    # ── Events grouped by in-month day number ─────────────────────────────────
-    ev_by_day: dict[int, list] = {}
+    # ── Event spans (multi-day events render as bars that wrap weeks) ─────────
+    event_page_map = event_page_map or {}
+    m_first = date(year, month, 1)
+    m_last  = date(year, month, calendar.monthrange(year, month)[1])
+    ev_spans: list = []
     for e in events:
-        loc = e.start.astimezone(tz)
-        if loc.year == year and loc.month == month:
-            ev_by_day.setdefault(loc.day, []).append(e)
+        first_d = e.start.astimezone(tz).date()
+        last_d  = (e.end.astimezone(tz) - timedelta(seconds=1)).date()
+        if last_d < first_d:
+            last_d = first_d
+        seg_s = max(first_d, m_first)
+        seg_e = min(last_d, m_last)
+        if seg_e < seg_s:
+            continue
+        ev_spans.append({"s": seg_s, "e": seg_e, "ev": e})
+    # Greedy lane assignment so overlapping events stack without colliding,
+    # longest-running events first so they keep the top lanes across weeks.
+    ev_spans.sort(key=lambda x: (x["s"], -((x["e"] - x["s"]).days), x["ev"].start))
+    lane_ends: list = []
+    for sp in ev_spans:
+        for li in range(len(lane_ends)):
+            if sp["s"] > lane_ends[li]:
+                lane_ends[li] = sp["e"]; sp["lane"] = li; break
+        else:
+            sp["lane"] = len(lane_ends); lane_ends.append(sp["e"])
 
     cal_weeks = calendar.Calendar(firstweekday=6).monthdatescalendar(year, month)
     n_weeks   = len(cal_weeks)
@@ -825,10 +845,11 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
             c.linkAbsolute("", row_wbm,
                            (grid_left, row_y_bot, day_left, row_y_top))
 
+        # Cell backgrounds, day numbers and whole-cell tap targets
         for col, d in enumerate(week):
-            cx          = day_left + col * WKDAY_W
-            in_month    = (d.month == month and d.year == year)
-            is_today    = (d == today)
+            cx        = day_left + col * WKDAY_W
+            in_month  = (d.month == month and d.year == year)
+            is_today  = (d == today)
 
             if not in_month:
                 # Adjacent-month day: hatch the cell, grey number, no events
@@ -842,7 +863,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
             if is_today:
                 filled_rect(c, cx, row_y_bot, WKDAY_W, cell_h, fill=C_ACCENT_LT)
 
-            # ── Day number (top-right) ─────────────────────────────
+            # Day number (top-right)
             num_x = cx + WKDAY_W - 2.5 * mm
             num_y = row_y_top - 5 * mm
             if is_today:
@@ -854,31 +875,50 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                 txt(c, num_x, num_y, str(d.day),
                     size=8, bold=False, col=C_INK, align="right")
 
-            # ── Event pills (below the number) ─────────────────────
-            day_evts = ev_by_day.get(d.day, [])
-            pill_x   = cx + 1 * mm
-            pill_w   = WKDAY_W - 2 * mm
-            pill_h   = 5.5 * mm
-            pill_gap = 1.2 * mm
-            pill_y   = row_y_top - 9 * mm
-            for evt in day_evts[:3]:
-                if pill_y - pill_h < row_y_bot + 1 * mm:
-                    circle(c, cx + 3 * mm, row_y_bot + 3 * mm,
-                           1.5 * mm, fill=C_SILVER)
-                    break
-                ec = _event_color(evt.title)
-                filled_rect(c, pill_x, pill_y - pill_h,
-                            pill_w, pill_h, fill=ec, r=2)
-                txt(c, pill_x + 2 * mm, pill_y - pill_h + 1.8 * mm,
-                    evt.title, size=8, bold=True, col=C_WHITE,
-                    max_w=pill_w - 3 * mm)
-                pill_y -= pill_h + pill_gap
-
-            # Tap target → weekly page
+            # Whole-cell tap target → weekly page
             dk = d.isoformat()
             if dk in day_week_map:
                 c.linkAbsolute("", day_week_map[dk],
                                (cx, row_y_bot, cx + WKDAY_W, row_y_top))
+
+        # ── Event bars for this week (multi-day spans wrap at week edges) ─────
+        BAR_H   = 4 * mm
+        BAR_GAP = 1.2 * mm
+        unit    = BAR_H + BAR_GAP
+        lane0_y = row_y_top - 8.5 * mm            # top edge of the lane-0 bar
+        week_s, week_e = week[0], week[6]
+        overflow: dict = {}
+        for sp in ev_spans:
+            if sp["e"] < week_s or sp["s"] > week_e:
+                continue
+            o_s   = max(sp["s"], week_s)
+            o_e   = min(sp["e"], week_e)
+            col_s = (o_s - week_s).days
+            col_e = (o_e - week_s).days
+            bar_top = lane0_y - sp["lane"] * unit
+            if bar_top - BAR_H < row_y_bot + 1.5 * mm:
+                dd = o_s
+                while dd <= o_e:
+                    overflow[dd] = overflow.get(dd, 0) + 1
+                    dd += timedelta(days=1)
+                continue
+            x0 = day_left + col_s * WKDAY_W + 0.6 * mm
+            x1 = day_left + (col_e + 1) * WKDAY_W - 0.6 * mm
+            ec = _event_color(sp["ev"].title)
+            filled_rect(c, x0, bar_top - BAR_H, x1 - x0, BAR_H, fill=ec, r=1.5)
+            txt(c, x0 + 1.5 * mm, bar_top - BAR_H + 1.2 * mm,
+                sp["ev"].title, size=7, bold=True, col=C_WHITE,
+                max_w=x1 - x0 - 3 * mm)
+            if sp["ev"].id in event_page_map:
+                c.linkAbsolute("", f"event_{sp['ev'].id}",
+                               (x0, bar_top - BAR_H, x1, bar_top))
+
+        # Overflow "+N" markers for days that ran out of lane room
+        for col, d in enumerate(week):
+            if overflow.get(d):
+                cx = day_left + col * WKDAY_W
+                txt(c, cx + 1.5 * mm, row_y_bot + 1.5 * mm,
+                    f"+{overflow[d]}", size=6, col=C_GREY)
 
     # ── Grid lines (on top of cell content) ───────────────────────────────────
     for r in range(n_weeks + 1):
@@ -1671,14 +1711,11 @@ def build_planner(
     _NAV_VALID_BMS |= {f"day_{(wm + timedelta(days=i)).isoformat()}"
                        for wm in weeks for i in range(5)}
 
-    # Group events by month and by day
-    ev_by_month: dict[tuple, list] = {m: [] for m in months}
-    ev_by_day:   dict[str, list]   = {}
+    # Group events by day (month pages filter the full list themselves so that
+    # events spanning a month boundary still render on both months)
+    ev_by_day: dict[str, list] = {}
     for e in events:
         loc = e.start.astimezone(tz)
-        key = (loc.year, loc.month)
-        if key in ev_by_month:
-            ev_by_month[key].append(e)
         dk = loc.strftime("%Y-%m-%d")
         ev_by_day.setdefault(dk, []).append(e)
 
@@ -1765,8 +1802,9 @@ def build_planner(
         c.bookmarkPage(month_bm)
         c.addOutlineEntry(
             datetime(year, month, 1).strftime("%B %Y"), month_bm, level=0)
-        draw_month_page(c, year, month, ev_by_month[(year, month)], day_week_map,
-                        tz=tz, active_months=months_by_year[year])
+        draw_month_page(c, year, month, events, day_week_map,
+                        tz=tz, active_months=months_by_year[year],
+                        event_page_map=event_pg)
         c.showPage()
 
         # Weeks that belong to this month, in chronological order
