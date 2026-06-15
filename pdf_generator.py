@@ -252,19 +252,24 @@ _NAV_VALID_BMS: set = set()    # bookmark names that exist in this PDF
 
 
 def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
-                     **_legacy):
+                     omit=(), **_legacy):
     """
     Top-right navigation: Year (grid) · Month · Week · Day · List.
     Month/Week/Day are labelled tear-off calendar buttons showing TODAY
     (e.g. JUN / W24 / 13) that jump to today's pages when those pages exist.
     The List button jumps to the meetings agenda page.
     `active` highlights the current page type in the accent colour.
-    `omit_year` drops the leading grid button (used on the year page itself).
+    `omit` is a collection of button names to drop (e.g. "year" on the year
+    page, "month" on the current-month page — they would only link to self).
     """
     today = _NAV_TODAY or date.today()
     valid = _NAV_VALID_BMS
     wk    = _sunday_week_of_year(today)
     mon   = _week_monday(today)
+
+    omit = set(omit)
+    if omit_year:
+        omit.add("year")
 
     buttons = [
         # name,    kind,   label,                          bookmark
@@ -274,8 +279,8 @@ def draw_nav_buttons(c: canvas.Canvas, active: str, omit_year: bool = False,
         ("day",   "cal",  str(today.day),                  f"day_{today.isoformat()}"),
         ("list",  "list", "",                              MEETINGS_BM),
     ]
-    if omit_year:
-        buttons = [b for b in buttons if b[0] != "year"]
+    if omit:
+        buttons = [b for b in buttons if b[0] not in omit]
 
     BH    = 6.5 * mm
     BW_C  = 9.0 * mm      # labelled calendar button
@@ -715,8 +720,9 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
       pills below the number
     • Ruled notes area along the bottom
     """
-    today      = date.today()
-    month_name = datetime(year, month, 1).strftime("%B").upper()
+    today        = date.today()
+    month_name   = datetime(year, month, 1).strftime("%B").upper()
+    is_cur_month = (year == today.year and month == today.month)
 
     # ── Right-edge tab stack (current month highlighted) ──────────────────────
     _draw_year_edge_tabs(c, year, active_months=active_months, active_month=month)
@@ -729,9 +735,23 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
     mw = c.stringWidth(month_name, "Helvetica-Bold", 15)
     txt(c, MARGIN + mw + 5, top - 11, str(year), size=15, col=C_GREY)
 
+    # "CURRENT MONTH" pill (only on the month we're actually in)
+    if is_cur_month:
+        yr_w   = c.stringWidth(str(year), "Helvetica", 15)
+        plabel = "CURRENT MONTH"
+        pw     = c.stringWidth(plabel, "Helvetica-Bold", 7) + 5 * mm
+        ph     = 5.5 * mm
+        px     = MARGIN + mw + 5 + yr_w + 4 * mm
+        py     = top - 14
+        filled_rect(c, px, py, pw, ph, fill=C_CUR_PILL, r=2.5)
+        txt(c, px + pw / 2, py + 1.7 * mm, plabel,
+            size=7, bold=True, col=C_WHITE, align="center")
+
     month_bm = f"month_{year}_{month:02d}"
     week_bm  = day_week_map.get(date(year, month, 1).strftime("%Y-%m-%d"), "")
-    draw_nav_buttons(c, "month", month_bm=month_bm, week_bm=week_bm)
+    # On the current month, the Month nav button would only link to this page
+    draw_nav_buttons(c, "month", month_bm=month_bm, week_bm=week_bm,
+                     omit=("month",) if is_cur_month else ())
 
     cal_label = "CALENDAR"
     cs = 1.5   # extra letter spacing
@@ -787,9 +807,13 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                     WKDAY_W, body_h, fill=C_WKND)
 
     # ── Cell backgrounds (hatch out-of-month days) + content ──────────────────
+    cur_week_rect = None       # bounds of the row containing today (if any)
     for row, week in enumerate(cal_weeks):
         row_y_top = dow_y - row * cell_h
         row_y_bot = row_y_top - cell_h
+
+        if is_cur_month and any(d == today for d in week):
+            cur_week_rect = (day_left, row_y_bot, grid_right, row_y_top)
 
         # Week number, centred in the gutter, linked to the week page
         wk_num = _sunday_week_of_year(week[0])
@@ -814,12 +838,16 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                     str(d.day), size=8, col=C_SILVER, align="right")
                 continue
 
+            # Today's cell gets a light wash behind its content
+            if is_today:
+                filled_rect(c, cx, row_y_bot, WKDAY_W, cell_h, fill=C_ACCENT_LT)
+
             # ── Day number (top-right) ─────────────────────────────
             num_x = cx + WKDAY_W - 2.5 * mm
             num_y = row_y_top - 5 * mm
             if is_today:
                 circle(c, cx + WKDAY_W - 4 * mm, num_y + 1.3 * mm,
-                       4 * mm, fill=C_ACCENT)
+                       4 * mm, fill=C_TODAY_NAVY)
                 txt(c, num_x, num_y, str(d.day),
                     size=8, bold=True, col=C_WHITE, align="right")
             else:
@@ -860,6 +888,17 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
         vx = day_left + col * WKDAY_W
         vrule(c, vx, grid_bot, body_h, col=C_GHOST, lw=0.5)
     vrule(c, grid_left, grid_bot, body_h, col=C_GHOST, lw=0.5)   # outer-left
+
+    # ── Current-week emphasis (dotted outline around this week's row) ──────────
+    if cur_week_rect:
+        x0, y0, x1, y1 = cur_week_rect
+        c.saveState()
+        c.setStrokeColor(C_GREY)
+        c.setLineWidth(0.9)
+        c.setDash([1.4, 1.4])
+        c.rect(x0, y0, x1 - x0, y1 - y0, fill=0, stroke=1)
+        c.setDash([])
+        c.restoreState()
 
     # ── Notes area (ruled lines along the bottom) ─────────────────────────────
     ny = grid_bot - 6 * mm
