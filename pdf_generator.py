@@ -477,6 +477,11 @@ def draw_year_page(c: canvas.Canvas, year: int, day_week_map: dict,
             txt(c, cx0 + cell_w / 2, name_y, mname,
                 size=7, bold=True, col=C_INK, align="center")
 
+        # Tap the month name → that month's overview page (when it exists)
+        if active_months is None or m in active_months:
+            c.linkAbsolute("", f"month_{year}_{m:02d}",
+                           (cx0, name_y - 2 * mm, cx0 + cell_w, name_y + 4 * mm))
+
         # DOW row:  W  S M T W T F S
         dow_y = name_y - DOW_OFFS
         txt(c, cx0 + wk_w / 2, dow_y, "W", size=5.5, col=C_SILVER, align="center")
