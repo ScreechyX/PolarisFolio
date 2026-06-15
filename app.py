@@ -407,14 +407,19 @@ async def _run_generation(
     start_dt = datetime(start.year, start.month, start.day, 0, 0, 0, tzinfo=tz)
     end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=tz)
 
-    events = manager.get_events(start_dt, end_dt)
+    # Calendar pull is blocking network I/O — run off the event loop so the
+    # /history poll keeps responding while we generate.
+    events = await asyncio.to_thread(manager.get_events, start_dt, end_dt)
 
     # Generate PDF
     display_name = f"PolarisFolio {start.strftime('%b %Y')}"
     filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}.pdf"
     pdf_path = os.path.join(PDF_DIR, filename)
     self_email = await get_setting("ms_user_email", "")
-    build_planner(
+    # reportlab PDF generation is CPU-heavy and blocking — run it in a thread
+    # so it doesn't freeze the web server (and the progress poll) for everyone.
+    await asyncio.to_thread(
+        build_planner,
         events=events,
         output_path=pdf_path,
         start_date=start,
@@ -434,11 +439,13 @@ async def _run_generation(
         uploaded_to_rm=False,
     )
 
-    # Upload (may take a while — history entry already visible)
+    # Upload (may take a while — history entry already visible). Also blocking,
+    # so push it to a thread too.
     if upload and os.path.exists(pdf_path):
         try:
             uploader = RemarkableUploader({"rm_folder": rm_folder})
-            uploaded = uploader.upload(display_name, pdf_path, folder=rm_folder)
+            uploaded = await asyncio.to_thread(
+                uploader.upload, display_name, pdf_path, folder=rm_folder)
             if uploaded:
                 await update_upload_rm_status(upload_id, True)
         except Exception as e:

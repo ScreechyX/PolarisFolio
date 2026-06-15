@@ -12,6 +12,7 @@ Optimised for reMarkable Paper Pro (A4 portrait, colour e-ink display).
 import os
 import re
 import math
+import threading
 import calendar
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
@@ -1856,7 +1857,19 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
 # PDF builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_planner(
+# Serialises PDF builds: draw_* read module-level nav globals (_NAV_TODAY /
+# _NAV_VALID_BMS), so concurrent builds (e.g. two worker threads) must not
+# interleave. The lock makes build_planner safe to call from a thread pool.
+_BUILD_LOCK = threading.Lock()
+
+
+def build_planner(*args, **kwargs):
+    """Thread-safe wrapper around the PDF builder (see _build_planner_impl)."""
+    with _BUILD_LOCK:
+        return _build_planner_impl(*args, **kwargs)
+
+
+def _build_planner_impl(
     events: list,
     output_path: str,
     start_date: date = None,

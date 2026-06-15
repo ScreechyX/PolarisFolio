@@ -87,9 +87,11 @@ async def _scheduled_generate():
         print("Scheduler: no calendar sources configured, skipping")
         return
 
+    import asyncio
     start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=tz)
     end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=tz)
-    events = manager.get_events(start_dt, end_dt)
+    # Blocking network I/O — keep it off the shared event loop.
+    events = await asyncio.to_thread(manager.get_events, start_dt, end_dt)
 
     PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")
     os.makedirs(PDF_DIR, exist_ok=True)
@@ -97,7 +99,10 @@ async def _scheduled_generate():
     filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}_auto.pdf"
     pdf_path = os.path.join(PDF_DIR, filename)
 
-    build_planner(
+    # CPU-heavy reportlab work — run in a thread so the web server stays
+    # responsive while a scheduled planner is generated.
+    await asyncio.to_thread(
+        build_planner,
         events=events,
         output_path=pdf_path,
         start_date=start,
@@ -110,7 +115,8 @@ async def _scheduled_generate():
     if upload and os.path.exists(pdf_path):
         try:
             uploader = RemarkableUploader()
-            uploaded = uploader.upload(display_name, pdf_path, folder=rm_folder)
+            uploaded = await asyncio.to_thread(
+                uploader.upload, display_name, pdf_path, folder=rm_folder)
         except Exception as e:
             print(f"Scheduler: upload error - {e}")
 
