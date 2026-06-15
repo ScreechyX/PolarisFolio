@@ -1385,45 +1385,64 @@ _DAY_QUOTES = [
 
 def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
                   event_page_map: dict, tz,
-                  week_bookmark: str = "", month_bookmark: str = ""):
+                  week_bookmark: str = "", month_bookmark: str = "",
+                  prev_day_bm: str = "", next_day_bm: str = ""):
     """
     Dayfolio-style day view: left time-grid, right planning panel.
-    Left  ~38%: hour slots 7AM–8PM with timed event blocks
+    Left  ~38%: hour slots 7AM–6PM with timed event blocks
     Right ~62%: Quote · FOCUS box · PRIORITIES · TO DO LIST · NOTES
     """
     today = datetime.now(tz).date()
     month = day_date.month
+    is_today = (day_date == today)
 
     draw_tab(c, month, month_bookmark=month_bookmark)
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    day_label = _fmt(day_date, "%A, %B %-d").upper()
-    year_label = str(day_date.year)
-    is_today   = (day_date == today)
+    # ── Header: month + year, stacked week number, centred SCHEDULE label ──────
+    top = PAGE_H - MARGIN
+    month_str = day_date.strftime("%B").upper()
+    c.setFont("Helvetica-Bold", 15)
+    c.setFillColor(C_INK)
+    c.drawString(MARGIN, top - 11, month_str)
+    mw = c.stringWidth(month_str, "Helvetica-Bold", 15)
+    txt(c, MARGIN + mw + 5, top - 11, str(day_date.year), size=15, col=C_GREY)
+    yr_w = c.stringWidth(str(day_date.year), "Helvetica", 15)
+    wk_x = MARGIN + mw + 5 + yr_w + 5 * mm
+    txt(c, wk_x, top - 5, "WEEK", size=5.5, bold=True, col=C_GREY)
+    txt(c, wk_x, top - 13, str(_sunday_week_of_year(day_date)),
+        size=11, bold=True, col=C_INK)
 
-    sep_y = draw_page_header(
-        c,
-        left_label=day_label,
-        left_sub=year_label,
-        accent_bar=True,
-    )
-
-    if is_today:
-        w = c.stringWidth(day_label, "Helvetica-Bold", 15)
-        pill_x = MARGIN + 6 + w + 4 * mm
-        pill_y = PAGE_H - MARGIN - 14
-        pill_w = 16 * mm
-        pill_h = 6.5 * mm
-        filled_rect(c, pill_x, pill_y, pill_w, pill_h,
-                    fill=C_ACCENT, r=3)
-        txt(c, pill_x + pill_w / 2, pill_y + 1.8 * mm,
-            "TODAY", size=7, bold=True, col=C_WHITE, align="center")
+    _draw_caps_label(c, "SCHEDULE", MARGIN + CONTENT_W / 2, top - 22)
 
     day_bm = f"day_{day_date.isoformat()}"
-    draw_nav_buttons(c, "day",
-                     month_bm=month_bookmark,
-                     week_bm=week_bookmark,
-                     day_bm=day_bm)
+    draw_nav_buttons(c, "day", month_bm=month_bookmark, week_bm=week_bookmark,
+                     day_bm=day_bm, omit=("day",) if is_today else (),
+                     prev_bm=prev_day_bm, next_bm=next_day_bm)
+
+    sep_y = top - 28
+    hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
+
+    # ── Sub-header: weekday, month day  + relative-time status pill ────────────
+    sub_y     = sep_y - 6 * mm
+    day_label = _fmt(day_date, "%A, %B %-d").upper()
+    txt(c, MARGIN, sub_y, day_label, size=10.5, bold=True, col=C_INK)
+
+    delta_days  = (day_date - today).days
+    delta_weeks = (_week_monday(day_date) - _week_monday(today)).days // 7
+    if   delta_days == 0:   pill = ("TODAY",     C_TODAY_NAVY)
+    elif delta_days == 1:   pill = ("TOMORROW",  colors.HexColor("#2E9E5B"))
+    elif delta_days == -1:  pill = ("YESTERDAY", colors.HexColor("#E08A3C"))
+    elif delta_weeks == 0:  pill = ("THIS WEEK", C_ACCENT)
+    elif delta_weeks == -1: pill = ("LAST WEEK", colors.HexColor("#9AA0A6"))
+    elif delta_weeks == 1:  pill = ("NEXT WEEK", colors.HexColor("#3FA79F"))
+    else:                   pill = None
+    if pill:
+        ptext, pcol = pill
+        psx = MARGIN + c.stringWidth(day_label, "Helvetica-Bold", 10.5) + 4 * mm
+        psw = c.stringWidth(ptext, "Helvetica-Bold", 6.5) + 6 * mm
+        filled_rect(c, psx, sub_y - 1.6 * mm, psw, 5.0 * mm, fill=pcol, r=2.5)
+        txt(c, psx + psw / 2, sub_y - 0.1 * mm, ptext, size=6.5, bold=True,
+            col=C_WHITE, align="center")
 
     # ── Column geometry ────────────────────────────────────────────────────────
     SPLIT    = 0.38                         # time grid fraction of content width
@@ -1431,7 +1450,7 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
     PLAN_W   = CONTENT_W - TIME_W
     time_x   = MARGIN
     plan_x   = MARGIN + TIME_W
-    grid_top = sep_y - 2 * mm
+    grid_top = sub_y - 5 * mm
     grid_bot = MARGIN
 
     vrule(c, plan_x, grid_bot, grid_top - grid_bot, col=C_SILVER, lw=0.6)
@@ -1527,61 +1546,45 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
         else:
             qline2 = (qline2 + " " + w).strip()
 
-    txt(c, plan_x + pad, py - 6 * mm,
-        qline1, size=9, italic=True, col=C_INK_2)
+    # Rose accent bar to the left of the quote
+    q_top = py - 4 * mm
+    q_bot = py - (19 if qline2 else 15) * mm - 1 * mm
+    filled_rect(c, plan_x + pad, q_bot, 2, q_top - q_bot, fill=C_CUR_PILL)
+    qx = plan_x + pad + 3 * mm
+    txt(c, qx, py - 6 * mm, qline1, size=9, italic=True, col=C_INK_2)
     if qline2:
-        txt(c, plan_x + pad, py - 12.5 * mm,
-            qline2, size=9, italic=True, col=C_INK_2)
-    txt(c, plan_x + pad, py - (19 if qline2 else 15) * mm,
-        f"— {author.upper()}", size=7, bold=True, col=C_ACCENT)
+        txt(c, qx, py - 12.5 * mm, qline2, size=9, italic=True, col=C_INK_2)
+    txt(c, qx, py - (19 if qline2 else 15) * mm,
+        f"— {author.upper()}", size=7, bold=True, col=C_CUR_PILL)
 
     py -= (20 if qline2 else 17) * mm
 
-    # Horizontal rule
-    hrule(c, plan_x, py, PLAN_W, col=C_GHOST, lw=0.5)
-    py -= 1 * mm
-
-    # FOCUS box (salmon/pink background)
-    FOCUS_H = 38 * mm
-    focus_fill = colors.HexColor("#FCE4EC")
+    # FOCUS box (solid pink, rotated label, no inner rules)
+    FOCUS_H = 36 * mm
     filled_rect(c, plan_x + pad, py - FOCUS_H, PLAN_W - 2 * pad, FOCUS_H,
-                fill=focus_fill, r=3)
-
-    # "FOCUS" label rotated vertically inside box
+                fill=colors.HexColor("#E7BFC9"), r=4)
     c.saveState()
     c.setFont("Helvetica-Bold", 9)
-    c.setFillColor(colors.HexColor("#C06080"))
+    c.setFillColor(colors.HexColor("#9C6072"))
     c.translate(plan_x + pad + 5 * mm, py - FOCUS_H / 2)
     c.rotate(90)
     c.drawCentredString(0, 0, "FOCUS")
     c.restoreState()
 
-    # Ruled lines inside FOCUS box
-    fy = py - 8 * mm
-    while fy > py - FOCUS_H + 3 * mm:
-        hrule(c, plan_x + pad + 11 * mm, fy,
-              PLAN_W - 2 * pad - 12 * mm,
-              col=colors.HexColor("#E8B4C0"), lw=0.5)
-        fy -= line_h
+    py -= FOCUS_H + 5 * mm
 
-    py -= FOCUS_H + 4 * mm
-
-    # PRIORITIES
-    hrule(c, plan_x, py, PLAN_W, col=C_GHOST, lw=0.5)
-    txt(c, plan_x + pad, py - 5 * mm, "PRIORITIES",
-        size=9, bold=True, col=C_GREY)
-    py -= 12 * mm
+    # PRIORITIES — three rose-graded circles
+    txt(c, plan_x + pad, py, "PRIORITIES", size=9, bold=True, col=C_GREY)
+    py -= 7 * mm
     circ_r = 4 * mm
+    prio_cols = [colors.HexColor("#A23E4E"), colors.HexColor("#CC5E70"),
+                 colors.HexColor("#E59AA8")]
     for n in range(1, 4):
         cx2 = plan_x + pad + circ_r
-        if n <= 2:
-            circle(c, cx2, py, circ_r, fill=C_ACCENT)
-            c.setFont("Helvetica-Bold", 9); c.setFillColor(C_WHITE)
-        else:
-            circle(c, cx2, py, circ_r, fill=C_GHOST, stroke=C_SILVER, lw=0.5)
-            c.setFont("Helvetica-Bold", 9); c.setFillColor(C_SILVER)
+        circle(c, cx2, py, circ_r, fill=prio_cols[n - 1])
+        c.setFont("Helvetica-Bold", 9); c.setFillColor(C_WHITE)
         c.drawCentredString(cx2, py - 3, str(n))
-        hrule(c, cx2 + circ_r + 2 * mm, py,
+        hrule(c, cx2 + circ_r + 2 * mm, py - 1 * mm,
               PLAN_W - pad - circ_r * 2 - 7 * mm,
               col=C_GHOST, lw=0.5)
         py -= circ_r * 2 + 3 * mm
@@ -1959,9 +1962,22 @@ def build_planner(
                 c.addOutlineEntry(
                     f"  {_fmt(day_d, '%a %-d %b')}", d_bm, level=2)
                 day_ev = ev_by_day.get(day_d.strftime("%Y-%m-%d"), [])
+                # Prev/next day steppers (Mon–Fri chain across weeks)
+                if i > 0:
+                    prev_day_bm = f"day_{(day_d - timedelta(days=1)).isoformat()}"
+                else:
+                    pw = w - timedelta(days=7)
+                    prev_day_bm = (f"day_{(pw + timedelta(days=4)).isoformat()}"
+                                   if pw in week_set else "")
+                if i < 4:
+                    next_day_bm = f"day_{(day_d + timedelta(days=1)).isoformat()}"
+                else:
+                    nw = w + timedelta(days=7)
+                    next_day_bm = f"day_{nw.isoformat()}" if nw in week_set else ""
                 draw_day_page(c, day_d, day_ev, event_pg, tz,
                               week_bookmark=week_bm,
-                              month_bookmark=month_bm)
+                              month_bookmark=month_bm,
+                              prev_day_bm=prev_day_bm, next_day_bm=next_day_bm)
                 c.showPage()
 
             # Event detail pages for this week, sorted by start time
