@@ -1755,9 +1755,9 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
     draw_nav_buttons(c, "", month_bm=f"month_{year}_{month:02d}",
                      week_bm=week_bookmark, day_bm=day_bm, ctx_date=ls.date())
 
-    # ── Title row: event-colour marker + title ────────────────────────────────
-    ty = top - 26
-    filled_rect(c, MARGIN, ty - 1 * mm, 4 * mm, 4 * mm,
+    # ── Title row: event-colour marker + title (clear of the pills above) ─────
+    ty = top - 34
+    filled_rect(c, MARGIN, ty - 0.5 * mm, 4 * mm, 4 * mm,
                 fill=_event_color(event.title), r=1.2)
     c.setFont("Helvetica-Bold", 16)
     c.setFillColor(C_INK)
