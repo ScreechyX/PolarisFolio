@@ -167,6 +167,25 @@ def circle(c: canvas.Canvas, cx, cy, r, fill, stroke=None, lw=0.5):
     c.circle(cx, cy, r, fill=1, stroke=1 if stroke else 0)
 
 
+def hatch_rect(c: canvas.Canvas, x, y, w, h, col=None, gap=2.4, lw=0.3):
+    """Fill a rectangle with 45° diagonal hatching (clipped to bounds).
+    Used to grey-out days that fall outside the displayed month."""
+    c.saveState()
+    p = c.beginPath()
+    p.rect(x, y, w, h)
+    c.clipPath(p, stroke=0, fill=0)
+    c.setStrokeColor(col if col is not None else C_GHOST)
+    c.setLineWidth(lw)
+    step = gap * mm
+    i = -int(h / step) - 1
+    x_end = x + w
+    while x + i * step <= x_end:
+        x0 = x + i * step
+        c.line(x0, y, x0 + h, y + h)
+        i += 1
+    c.restoreState()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Navigation buttons (top-right of every page header)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -370,18 +389,21 @@ def draw_page_header(c: canvas.Canvas,
 _MINI_DOW = ["S", "M", "T", "W", "T", "F", "S"]
 
 
-def _draw_year_edge_tabs(c: canvas.Canvas, year: int, active_months: set = None):
+def _draw_year_edge_tabs(c: canvas.Canvas, year: int, active_months: set = None,
+                         active_month: int = None):
     """Right-edge tab stack: a "year" cap + 12 labelled month segments.
     Each month segment links to that month's overview page (when it exists).
-    Shared by the year overview and meetings agenda pages."""
+    `active_month` renders that segment as a white "current" tab with coloured
+    text (used on the month overview pages).
+    Shared by the year overview, month overview and meetings agenda pages."""
     tab_x = PAGE_W - TAB_W
     n_seg = 13                       # 1 year cap + 12 months
     seg_h = PAGE_H / n_seg
 
-    def _tab_label(seg_y0: float, text: str, col):
+    def _tab_label(seg_y0: float, text: str, col, text_col=C_WHITE):
         filled_rect(c, tab_x, seg_y0, TAB_W, seg_h, fill=col)
         c.saveState()
-        c.setFillColor(C_WHITE)
+        c.setFillColor(text_col)
         c.setFont("Helvetica-Bold", 7)
         c.translate(tab_x + TAB_W / 2, seg_y0 + seg_h / 2)
         c.rotate(90)
@@ -394,8 +416,13 @@ def _draw_year_edge_tabs(c: canvas.Canvas, year: int, active_months: set = None)
     # Month segments, each its own pastel + rotated abbreviation
     for m in range(1, 13):
         y0 = PAGE_H - (m + 1) * seg_h
-        _tab_label(y0, datetime(year, m, 1).strftime("%b").upper(),
-                   colors.HexColor(MONTH_TAB_COLORS[(m - 1) % 12]))
+        m_col = colors.HexColor(MONTH_TAB_COLORS[(m - 1) % 12])
+        if m == active_month:
+            # Highlighted current month: white segment, coloured label
+            _tab_label(y0, datetime(year, m, 1).strftime("%b").upper(),
+                       C_WHITE, text_col=m_col)
+        else:
+            _tab_label(y0, datetime(year, m, 1).strftime("%b").upper(), m_col)
         if active_months is None or m in active_months:
             mbm = f"month_{year}_{m:02d}"
             c.linkAbsolute("", mbm, (tab_x, y0, PAGE_W, y0 + seg_h))
@@ -670,127 +697,146 @@ def draw_meetings_page(c: canvas.Canvas, year: int, events: list,
 # ─────────────────────────────────────────────────────────────────────────────
 
 _DOW = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
+_DOW_FULL = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY",
+             "THURSDAY", "FRIDAY", "SATURDAY"]
 
 def draw_month_page(c: canvas.Canvas, year: int, month: int,
                     events: list,
                     day_week_map: dict,
-                    tz=timezone.utc):
+                    tz=timezone.utc,
+                    active_months: set = None):
     """
-    Full-page monthly calendar grid.
+    Full-page monthly calendar grid (Dayfolio style).
 
-    Columns: week-num gutter + SUN … SAT
-    Each cell: day number (circle if today) + up to 2 event pill bars
+    • Right-edge year tab stack with the current month highlighted
+    • Header: month + year, centred "CALENDAR" label
+    • Columns: week-num gutter + SUNDAY … SATURDAY (full names)
+    • Tall cells: day number top-right, leading/trailing days hatched, event
+      pills below the number
+    • Ruled notes area along the bottom
     """
-    draw_tab(c, month)
+    today      = date.today()
     month_name = datetime(year, month, 1).strftime("%B").upper()
-    sep_y = draw_page_header(
-        c,
-        left_label=f"{month_name} {year}",
-        left_sub="MONTHLY OVERVIEW",
-        accent_bar=True,
-    )
-    # First week of this month as the "week" nav target
-    first_day_key = date(year, month, 1).strftime("%Y-%m-%d")
-    week_bm = day_week_map.get(first_day_key, "")
+
+    # ── Right-edge tab stack (current month highlighted) ──────────────────────
+    _draw_year_edge_tabs(c, year, active_months=active_months, active_month=month)
+
+    # ── Header: "MONTH year" + centred CALENDAR label ─────────────────────────
+    top = PAGE_H - MARGIN
+    c.setFont("Helvetica-Bold", 15)
+    c.setFillColor(C_INK)
+    c.drawString(MARGIN, top - 11, month_name)
+    mw = c.stringWidth(month_name, "Helvetica-Bold", 15)
+    txt(c, MARGIN + mw + 5, top - 11, str(year), size=15, col=C_GREY)
+
     month_bm = f"month_{year}_{month:02d}"
+    week_bm  = day_week_map.get(date(year, month, 1).strftime("%Y-%m-%d"), "")
     draw_nav_buttons(c, "month", month_bm=month_bm, week_bm=week_bm)
 
-    # Group events by local day number
+    cal_label = "CALENDAR"
+    cs = 1.5   # extra letter spacing
+    cal_w = c.stringWidth(cal_label, "Helvetica-Bold", 7) + cs * len(cal_label)
+    to = c.beginText()
+    to.setFont("Helvetica-Bold", 7)
+    to.setFillColor(C_GREY)
+    to.setCharSpace(cs)
+    to.setTextOrigin(MARGIN + CONTENT_W / 2 - cal_w / 2, top - 22)
+    to.textOut(cal_label)
+    c.drawText(to)
+
+    sep_y = top - 28
+    hrule(c, MARGIN, sep_y, CONTENT_W, col=C_SILVER, lw=0.6)
+
+    # ── Events grouped by in-month day number ─────────────────────────────────
     ev_by_day: dict[int, list] = {}
     for e in events:
         loc = e.start.astimezone(tz)
         if loc.year == year and loc.month == month:
             ev_by_day.setdefault(loc.day, []).append(e)
 
-    cal_weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
+    cal_weeks = calendar.Calendar(firstweekday=6).monthdatescalendar(year, month)
     n_weeks   = len(cal_weeks)
-    today     = date.today()
 
-    # Geometry
-    WEEK_COL_W = 8 * mm           # narrow week-number gutter
-    WKDAY_W    = (CONTENT_W - WEEK_COL_W) / 7   # each day column
+    # ── Geometry ──────────────────────────────────────────────────────────────
+    WEEK_COL_W = 8 * mm                       # week-number gutter
+    WKDAY_W    = (CONTENT_W - WEEK_COL_W) / 7
+    DOW_ROW_H  = 7 * mm                        # weekday-name header row
+    NOTES_H    = 26 * mm                       # ruled notes area at the bottom
 
-    DOW_ROW_H  = 7 * mm           # height of day-of-week header row
-    grid_top   = sep_y - 2 * mm
-    grid_bot   = MARGIN
-    body_h     = grid_top - DOW_ROW_H - grid_bot
-    cell_h     = body_h / n_weeks
+    grid_top = sep_y - 3 * mm
+    grid_bot = MARGIN + NOTES_H
+    dow_y    = grid_top - DOW_ROW_H           # top of the cell body
+    body_h   = dow_y - grid_bot
+    cell_h   = body_h / n_weeks
 
-    # ── Day-of-week header row ──────────────────────────────────────────────
-    dow_y  = grid_top - DOW_ROW_H
-    # "Wk" label over the gutter
-    txt(c, MARGIN, dow_y + 2 * mm, "WK",
-        size=7, bold=True, col=C_SILVER)
+    grid_left  = MARGIN
+    grid_right = MARGIN + CONTENT_W
+    day_left   = MARGIN + WEEK_COL_W
 
-    for col, label in enumerate(_DOW):
-        cx = MARGIN + WEEK_COL_W + col * WKDAY_W
-        is_wknd = col == 0 or col == 6   # Sun or Sat
-        # Weekend column shading (full height of body)
-        if is_wknd:
-            filled_rect(c, cx, grid_bot,
-                        WKDAY_W, body_h,
-                        fill=C_WKND)
-        txt(c, cx + WKDAY_W / 2, dow_y + 1.8 * mm, label,
-            size=7.5, bold=True,
-            col=C_GREY if is_wknd else C_INK_2,
-            align="center")
+    # ── Weekday header row (full names) ───────────────────────────────────────
+    for col, label in enumerate(_DOW_FULL):
+        cx = day_left + col * WKDAY_W
+        is_wknd = col in (0, 6)
+        txt(c, cx + WKDAY_W / 2, dow_y + 2 * mm, label,
+            size=7, bold=True,
+            col=C_GREY if is_wknd else C_INK_2, align="center")
 
-    # Separator under header
-    hrule(c, MARGIN, dow_y, CONTENT_W, col=C_SILVER, lw=0.5)
+    # ── Weekend column shading (body height) ──────────────────────────────────
+    for col in (0, 6):
+        filled_rect(c, day_left + col * WKDAY_W, grid_bot,
+                    WKDAY_W, body_h, fill=C_WKND)
 
-    # ── Calendar cells ──────────────────────────────────────────────────────
+    # ── Cell backgrounds (hatch out-of-month days) + content ──────────────────
     for row, week in enumerate(cal_weeks):
         row_y_top = dow_y - row * cell_h
         row_y_bot = row_y_top - cell_h
 
-        # Week number (Sunday-based, matching the year overview)
-        if week[0] or week[-1]:
-            sample_day = next(d for d in week if d)
-            wk_num = _sunday_week_of_year(date(year, month, sample_day))
-            txt(c, MARGIN + 1 * mm, row_y_bot + cell_h - 4 * mm,
-                str(wk_num), size=7, col=C_SILVER)
+        # Week number, centred in the gutter, linked to the week page
+        wk_num = _sunday_week_of_year(week[0])
+        txt(c, MARGIN + WEEK_COL_W / 2, row_y_top - cell_h / 2 - 2,
+            f"W{wk_num}", size=7, col=C_SILVER, align="center")
+        row_wbm = next((day_week_map[d.isoformat()] for d in week
+                        if d.isoformat() in day_week_map), "")
+        if row_wbm:
+            c.linkAbsolute("", row_wbm,
+                           (grid_left, row_y_bot, day_left, row_y_top))
 
-        # Horizontal row divider
-        hrule(c, MARGIN, row_y_bot, CONTENT_W, col=C_GHOST, lw=0.5)
+        for col, d in enumerate(week):
+            cx          = day_left + col * WKDAY_W
+            in_month    = (d.month == month and d.year == year)
+            is_today    = (d == today)
 
-        for col, day_num in enumerate(week):
-            if day_num == 0:
+            if not in_month:
+                # Adjacent-month day: hatch the cell, grey number, no events
+                hatch_rect(c, cx, row_y_bot, WKDAY_W, cell_h,
+                           col=C_SILVER, gap=2.6)
+                txt(c, cx + WKDAY_W - 2.5 * mm, row_y_top - 5 * mm,
+                    str(d.day), size=8, col=C_SILVER, align="right")
                 continue
 
-            cx    = MARGIN + WEEK_COL_W + col * WKDAY_W
-            is_wknd   = col == 0 or col == 6   # Sun or Sat
-            is_today  = (date(year, month, day_num) == today)
-            day_key   = f"{year}-{month:02d}-{day_num:02d}"
-
-            # ── Day number ─────────────────────────────────────────
-            num_cx = cx + 4 * mm
-            num_cy = row_y_top - 4.5 * mm
-
+            # ── Day number (top-right) ─────────────────────────────
+            num_x = cx + WKDAY_W - 2.5 * mm
+            num_y = row_y_top - 5 * mm
             if is_today:
-                # Filled circle behind the number
-                circle(c, num_cx, num_cy + 1.5 * mm, 4.5 * mm, fill=C_ACCENT)
-                txt(c, num_cx, num_cy, str(day_num),
-                    size=8, bold=True, col=C_WHITE, align="center")
+                circle(c, cx + WKDAY_W - 4 * mm, num_y + 1.3 * mm,
+                       4 * mm, fill=C_ACCENT)
+                txt(c, num_x, num_y, str(d.day),
+                    size=8, bold=True, col=C_WHITE, align="right")
             else:
-                num_col = C_GREY if is_wknd else C_INK
-                txt(c, num_cx, num_cy, str(day_num),
-                    size=8, bold=False, col=num_col, align="center")
+                txt(c, num_x, num_y, str(d.day),
+                    size=8, bold=False, col=C_INK, align="right")
 
-            # ── Event pills ────────────────────────────────────────
-            day_evts = ev_by_day.get(day_num, [])
+            # ── Event pills (below the number) ─────────────────────
+            day_evts = ev_by_day.get(d.day, [])
             pill_x   = cx + 1 * mm
             pill_w   = WKDAY_W - 2 * mm
             pill_h   = 5.5 * mm
             pill_gap = 1.2 * mm
-            # Start below the day number area
-            pill_y   = row_y_top - 10 * mm
-
-            for i, evt in enumerate(day_evts[:3]):
+            pill_y   = row_y_top - 9 * mm
+            for evt in day_evts[:3]:
                 if pill_y - pill_h < row_y_bot + 1 * mm:
-                    # No room — show overflow dot
-                    circle(c, cx + WKDAY_W - 3 * mm,
-                           row_y_bot + 3 * mm, 2 * mm,
-                           fill=C_SILVER)
+                    circle(c, cx + 3 * mm, row_y_bot + 3 * mm,
+                           1.5 * mm, fill=C_SILVER)
                     break
                 ec = _event_color(evt.title)
                 filled_rect(c, pill_x, pill_y - pill_h,
@@ -801,20 +847,25 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
                 pill_y -= pill_h + pill_gap
 
             # Tap target → weekly page
-            if day_key in day_week_map:
-                c.linkAbsolute("", day_week_map[day_key],
+            dk = d.isoformat()
+            if dk in day_week_map:
+                c.linkAbsolute("", day_week_map[dk],
                                (cx, row_y_bot, cx + WKDAY_W, row_y_top))
 
-        # Vertical column separators (draw once per row, over the content)
-        for col in range(1, 7):
-            vx = MARGIN + WEEK_COL_W + col * WKDAY_W
-            vrule(c, vx, row_y_bot, cell_h, col=C_GHOST, lw=0.5)
+    # ── Grid lines (on top of cell content) ───────────────────────────────────
+    for r in range(n_weeks + 1):
+        y = dow_y - r * cell_h
+        hrule(c, grid_left, y, CONTENT_W, col=C_GHOST, lw=0.5)
+    for col in range(8):
+        vx = day_left + col * WKDAY_W
+        vrule(c, vx, grid_bot, body_h, col=C_GHOST, lw=0.5)
+    vrule(c, grid_left, grid_bot, body_h, col=C_GHOST, lw=0.5)   # outer-left
 
-    # Outer grid borders
-    hrule(c, MARGIN, grid_bot, CONTENT_W, col=C_GHOST, lw=0.5)
-    vrule(c, MARGIN + WEEK_COL_W, grid_bot, body_h, col=C_GHOST, lw=0.5)
-    vrule(c, MARGIN + WEEK_COL_W + 5 * WKDAY_W, grid_bot,
-          body_h, col=C_SILVER, lw=0.5)   # weekday/weekend divider
+    # ── Notes area (ruled lines along the bottom) ─────────────────────────────
+    ny = grid_bot - 6 * mm
+    while ny > MARGIN - 1:
+        hrule(c, grid_left, ny, CONTENT_W, col=C_GHOST, lw=0.5)
+        ny -= 6.5 * mm
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1664,13 +1715,19 @@ def build_planner(
     draw_year_page(c, year_val, day_week_map, active_months=active_months_set_int, tz=tz)
     c.showPage()
 
+    # Months present per year — drives the right-edge tab links on each page
+    months_by_year: dict[int, set] = defaultdict(set)
+    for (yr, mo) in months:
+        months_by_year[yr].add(mo)
+
     for year, month in months:
         # Month overview
         month_bm = f"month_{year}_{month:02d}"
         c.bookmarkPage(month_bm)
         c.addOutlineEntry(
             datetime(year, month, 1).strftime("%B %Y"), month_bm, level=0)
-        draw_month_page(c, year, month, ev_by_month[(year, month)], day_week_map, tz=tz)
+        draw_month_page(c, year, month, ev_by_month[(year, month)], day_week_map,
+                        tz=tz, active_months=months_by_year[year])
         c.showPage()
 
         # Weeks that belong to this month, in chronological order
