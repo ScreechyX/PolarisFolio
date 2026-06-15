@@ -11,6 +11,7 @@ Optimised for reMarkable Paper Pro (A4 portrait, colour e-ink display).
 
 import os
 import re
+import math
 import calendar
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
@@ -267,6 +268,53 @@ def _caps_left(c: canvas.Canvas, text: str, x: float, baseline_y: float,
     to.textOut(text)
     c.drawText(to)
     c.restoreState()
+
+
+def _draw_recur_icon(c: canvas.Canvas, cx, cy, r, col):
+    """A small circular ‘recurring’ arrow."""
+    c.saveState()
+    c.setStrokeColor(col); c.setLineWidth(0.9); c.setLineCap(1)
+    start, extent = 110, 280
+    p = c.beginPath()
+    p.arc(cx - r, cy - r, cx + r, cy + r, start, extent)
+    c.drawPath(p, stroke=1, fill=0)
+    ang = math.radians(start + extent)
+    ex, ey = cx + r * math.cos(ang), cy + r * math.sin(ang)
+    tx, ty = -math.sin(ang), math.cos(ang)          # tangent (CCW)
+    nx, ny = math.cos(ang), math.sin(ang)           # radial
+    s = r * 0.95
+    c.setFillColor(col)
+    tri = c.beginPath()
+    tri.moveTo(ex + tx * s, ey + ty * s)
+    tri.lineTo(ex + nx * s * 0.6, ey + ny * s * 0.6)
+    tri.lineTo(ex - nx * s * 0.6, ey - ny * s * 0.6)
+    tri.close()
+    c.drawPath(tri, stroke=0, fill=1)
+    c.restoreState()
+
+
+def _draw_pill(c: canvas.Canvas, x: float, cy: float, text: str, fill,
+               icon: str = None, size: float = 6.5, cs: float = 0.8) -> float:
+    """Capsule pill (fully rounded) with letter-spaced white caps text and an
+    optional leading icon. Returns the pill's right-edge x for chaining."""
+    pad    = 3.6 * mm
+    h      = 6.2 * mm
+    tw     = c.stringWidth(text, "Helvetica-Bold", size) + cs * len(text)
+    icon_w = 4.2 * mm if icon else 0
+    w      = pad + icon_w + tw + pad
+    filled_rect(c, x, cy - h / 2, w, h, fill=fill, r=h / 2)
+    if icon == "recur":
+        _draw_recur_icon(c, x + pad + 1.7 * mm, cy, 1.7 * mm, C_WHITE)
+    c.saveState()
+    to = c.beginText()
+    to.setFont("Helvetica-Bold", size)
+    to.setFillColor(C_WHITE)
+    to.setCharSpace(cs)
+    to.setTextOrigin(x + pad + icon_w, cy - size * 0.34)
+    to.textOut(text)
+    c.drawText(to)
+    c.restoreState()
+    return x + w
 
 
 def _draw_cal_button(c: canvas.Canvas, cx, cy, bw, bh, label, col):
@@ -803,15 +851,9 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
 
     # "CURRENT MONTH" pill (only on the month we're actually in)
     if is_cur_month:
-        yr_w   = c.stringWidth(str(year), "Helvetica", 15)
-        plabel = "CURRENT MONTH"
-        pw     = c.stringWidth(plabel, "Helvetica-Bold", 7) + 5 * mm
-        ph     = 5.5 * mm
-        px     = MARGIN + mw + 5 + yr_w + 4 * mm
-        py     = top - 14
-        filled_rect(c, px, py, pw, ph, fill=C_CUR_PILL, r=2.5)
-        txt(c, px + pw / 2, py + 1.7 * mm, plabel,
-            size=7, bold=True, col=C_WHITE, align="center")
+        yr_w = c.stringWidth(str(year), "Helvetica", 15)
+        px   = MARGIN + mw + 5 + yr_w + 4 * mm
+        _draw_pill(c, px, top - 6, "CURRENT MONTH", C_CUR_PILL, size=7)
 
     month_bm = f"month_{year}_{month:02d}"
     week_bm  = day_week_map.get(date(year, month, 1).strftime("%Y-%m-%d"), "")
@@ -1070,10 +1112,7 @@ def draw_week_page(c: canvas.Canvas,
     if pill:
         ptext, pcol = pill
         psx = MARGIN + c.stringWidth(sub_label, "Helvetica-Bold", 8.5) + 4 * mm
-        psw = c.stringWidth(ptext, "Helvetica-Bold", 6.5) + 6 * mm
-        filled_rect(c, psx, sub_y - 1.6 * mm, psw, 5.0 * mm, fill=pcol, r=2.5)
-        txt(c, psx + psw / 2, sub_y - 0.1 * mm, ptext, size=6.5, bold=True,
-            col=C_WHITE, align="center")
+        _draw_pill(c, psx, sub_y + 1.1 * mm, ptext, pcol)
 
     # ── Geometry ──────────────────────────────────────────────────────────────
     TIME_COL_W = 12 * mm
@@ -1461,10 +1500,7 @@ def draw_day_page(c: canvas.Canvas, day_date: date, events: list,
     if pill:
         ptext, pcol = pill
         psx = MARGIN + c.stringWidth(day_label, "Helvetica-Bold", 10.5) + 4 * mm
-        psw = c.stringWidth(ptext, "Helvetica-Bold", 6.5) + 6 * mm
-        filled_rect(c, psx, sub_y - 1.6 * mm, psw, 5.0 * mm, fill=pcol, r=2.5)
-        txt(c, psx + psw / 2, sub_y - 0.1 * mm, ptext, size=6.5, bold=True,
-            col=C_WHITE, align="center")
+        _draw_pill(c, psx, sub_y + 1.3 * mm, ptext, pcol)
 
     # ── Column geometry ────────────────────────────────────────────────────────
     SPLIT    = 0.38                         # time grid fraction of content width
@@ -1699,18 +1735,20 @@ def draw_meeting_page(c: canvas.Canvas, event: CalendarEvent,
                          active_month=month)
 
     top = PAGE_H - MARGIN
+    pill_cy = top - 9
 
-    # ── Header pills: MEETING NOTES + relative-time pill ──────────────────────
-    def _pill(x, text, col):
-        pw = c.stringWidth(text, "Helvetica-Bold", 6.5) + 6 * mm
-        filled_rect(c, x, top - 12, pw, 5.2 * mm, fill=col, r=2.6)
-        txt(c, x + pw / 2, top - 10.3, text, size=6.5, bold=True,
-            col=C_WHITE, align="center")
-        return x + pw + 2 * mm
-    plx = _pill(MARGIN, "MEETING NOTES", rose)
+    # ── Header pills: MEETING NOTES + relative-time pill (+ SERIES) ────────────
+    plx = _draw_pill(c, MARGIN, pill_cy, "MEETING NOTES", rose)
     rp = _relative_day_pill(ls.date(), today)
     if rp:
-        _pill(plx, rp[0], rp[1])
+        _draw_pill(c, plx + 2 * mm, pill_cy, rp[0], rp[1])
+    # SERIES pill (recurring events), centred in the header row
+    if getattr(event, "is_recurring", False):
+        stext = "SERIES"
+        sw = 3.6 * mm + 4.2 * mm + (c.stringWidth(stext, "Helvetica-Bold", 6.5)
+                                    + 0.8 * len(stext)) + 3.6 * mm
+        _draw_pill(c, MARGIN + CONTENT_W / 2 - sw / 2, pill_cy, stext, rose,
+                   icon="recur")
 
     # Nav points at the meeting's own month/week/day (ctx_date)
     day_bm = day_bookmark or f"day_{ls.date().isoformat()}"

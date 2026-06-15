@@ -25,6 +25,7 @@ class CalendarEvent:
     description: Optional[str] = None
     attendees: list[Attendee] = field(default_factory=list)
     is_all_day: bool = False
+    is_recurring: bool = False
     calendar_name: str = "Calendar"
     source: str = "unknown"  # "graph" or "ical"
 

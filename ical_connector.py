@@ -220,6 +220,7 @@ def _expand_vevent(
                 description=description,
                 attendees=attendees,
                 is_all_day=is_all_day[0],
+                is_recurring=True,
                 calendar_name=calendar_name,
                 source="ical",
             ))

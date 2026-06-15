@@ -208,6 +208,7 @@ def _parse_graph_event(raw: dict) -> CalendarEvent:
         description=raw.get("bodyPreview", ""),
         attendees=attendees,
         is_all_day=raw.get("isAllDay", False),
+        is_recurring=raw.get("type", "singleInstance") != "singleInstance",
         calendar_name="Microsoft 365",
         source="graph",
     )
