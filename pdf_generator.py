@@ -176,86 +176,106 @@ YEAR_BM = "year_overview"   # bookmark for the year overview page
 C_WHITE = colors.white      # convenience alias used in nav icon drawing
 
 
-def _draw_nav_icon(c: canvas.Canvas, cx: float, cy: float,
-                   sz: float, name: str, col):
-    """Draw one nav icon centred at (cx, cy) within a sz×sz logical box."""
-    if name == "year":
-        # 3×3 grid of tiny squares
-        dot = sz * 0.13
-        step = sz * 0.33
-        for row in range(3):
-            for ci in range(3):
-                dx = cx + (ci - 1) * step
-                dy = cy + (row - 1) * step
-                c.setFillColor(col)
-                c.rect(dx - dot / 2, dy - dot / 2, dot, dot, fill=1, stroke=0)
+def _draw_grid_icon(c: canvas.Canvas, cx, cy, sz, col):
+    """3×3 grid of tiny squares — the year overview symbol."""
+    dot = sz * 0.13
+    step = sz * 0.33
+    c.setFillColor(col)
+    for row in range(3):
+        for ci in range(3):
+            dx = cx + (ci - 1) * step
+            dy = cy + (row - 1) * step
+            c.rect(dx - dot / 2, dy - dot / 2, dot, dot, fill=1, stroke=0)
 
-    elif name in ("month", "day"):
-        w = sz * 0.64; h = sz * 0.58; hdr_h = h * 0.3
-        x = cx - w / 2; y = cy - h / 2
-        c.setStrokeColor(col); c.setFillColor(C_WHITE); c.setLineWidth(0.5)
-        c.rect(x, y, w, h, fill=1, stroke=1)
+
+def _draw_list_icon(c: canvas.Canvas, cx, cy, sz, col):
+    """Agenda/list symbol — three rows, each a leading dot + line."""
+    row_gap = sz * 0.34
+    line_w  = sz * 0.52
+    dot_r   = sz * 0.075
+    x0 = cx - sz * 0.34
+    for r in range(3):
+        ly = cy + (r - 1) * row_gap
         c.setFillColor(col)
-        c.rect(x, y + h - hdr_h, w, hdr_h, fill=1, stroke=0)
-        if name == "day":
-            sq = sz * 0.15
-            c.rect(cx - sq / 2, cy - h * 0.1, sq, sq, fill=1, stroke=0)
-
-    elif name == "week":
-        w = sz * 0.64; h = sz * 0.58; hdr_h = h * 0.3
-        x = cx - w / 2; y = cy - h / 2
-        c.setStrokeColor(col); c.setFillColor(C_WHITE); c.setLineWidth(0.5)
-        c.rect(x, y, w, h, fill=1, stroke=1)
-        c.setFillColor(col)
-        c.rect(x, y + h - hdr_h, w, hdr_h, fill=1, stroke=0)
-        c.setStrokeColor(col); c.setLineWidth(0.3)
-        body_top = y + h - hdr_h
-        for i in range(1, 5):
-            lx = x + w * i / 5
-            c.line(lx, y, lx, body_top)
-
-    elif name == "menu":
-        lw = sz * 0.56
-        c.setStrokeColor(col); c.setLineWidth(0.75)
-        for row in range(3):
-            ly = cy + (row - 1) * sz * 0.29
-            c.line(cx - lw / 2, ly, cx + lw / 2, ly)
+        c.circle(x0, ly, dot_r, fill=1, stroke=0)
+        c.setStrokeColor(col); c.setLineWidth(0.8)
+        c.line(x0 + dot_r + 1.0 * mm, ly, x0 + dot_r + 1.0 * mm + line_w, ly)
 
 
-def draw_nav_buttons(c: canvas.Canvas, active: str,
-                     month_bm: str = "", week_bm: str = "", day_bm: str = ""):
+def _draw_cal_button(c: canvas.Canvas, cx, cy, bw, bh, label, col):
+    """Tear-off calendar glyph (two rings on top) with a centred label."""
+    x = cx - bw / 2
+    y = cy - bh / 2
+    hb = bh * 0.24                        # 'binding' strip height
+    # Rings poking above the top edge
+    c.setStrokeColor(col); c.setLineWidth(0.8)
+    for fx in (0.34, 0.66):
+        rx = x + bw * fx
+        c.line(rx, y + bh - 0.2 * mm, rx, y + bh + 1.0 * mm)
+    # Body
+    c.setFillColor(C_WHITE); c.setStrokeColor(col); c.setLineWidth(0.7)
+    c.roundRect(x, y, bw, bh, 1.2, fill=1, stroke=1)
+    # Binding rule near the top
+    hrule(c, x + 1.0 * mm, y + bh - hb, bw - 2.0 * mm, col=col, lw=0.6)
+    # Label centred in the lower area, shrunk to fit if needed
+    fs = 7.0
+    while fs > 4.5 and c.stringWidth(label, "Helvetica-Bold", fs) > bw - 2.2 * mm:
+        fs -= 0.5
+    area_mid = y + (bh - hb) / 2
+    txt(c, cx, area_mid - fs * 0.34, label, size=fs, bold=True, col=col, align="center")
+
+
+# Nav context set by build_planner before drawing pages (so the calendar
+# buttons can show "today" and only link to pages that actually exist).
+_NAV_TODAY = None              # date
+_NAV_VALID_BMS: set = set()    # bookmark names that exist in this PDF
+
+
+def draw_nav_buttons(c: canvas.Canvas, active: str, **_legacy):
     """
-    Draw 5 nav icons in the top-right of the page header.
-    active: "year" | "month" | "week" | "day"
-    Icons (left→right): year-grid, month-cal, week-cal, day-cal, menu
-    Active icon uses C_ACCENT; others use C_SILVER.
-    Tappable icons link to their bookmark; no-bookmark icons are display-only.
+    Top-right navigation: Year (grid) · Month · Week · Day · List.
+    Month/Week/Day are labelled tear-off calendar buttons showing TODAY
+    (e.g. JUN / W24 / 13) that jump to today's pages when those pages exist.
+    `active` highlights the current page type in the accent colour.
     """
-    SZ    = 6.5 * mm
-    GAP   = 2.0 * mm
-    right = MARGIN + CONTENT_W
-    top   = PAGE_H - MARGIN
-    cy    = top - 13   # vertically centred in the ~26pt header band
+    today = _NAV_TODAY or date.today()
+    valid = _NAV_VALID_BMS
+    wk    = _sunday_week_of_year(today)
+    mon   = _week_monday(today)
 
-    icons = [
-        ("year",  YEAR_BM),
-        ("month", month_bm),
-        ("week",  week_bm),
-        ("day",   day_bm),
-        ("menu",  ""),
+    buttons = [
+        # name,    kind,   label,                          bookmark
+        ("year",  "grid", "",                              YEAR_BM),
+        ("month", "cal",  today.strftime("%b").upper(),    f"month_{today.year}_{today.month:02d}"),
+        ("week",  "cal",  f"W{wk}",                        f"week_{mon.isoformat()}"),
+        ("day",   "cal",  str(today.day),                  f"day_{today.isoformat()}"),
+        ("list",  "list", "",                              ""),
     ]
 
-    total_w = len(icons) * SZ + (len(icons) - 1) * GAP
-    start_x = right - total_w
+    BH    = 6.5 * mm
+    BW_C  = 9.0 * mm      # labelled calendar button
+    BW_I  = 7.0 * mm      # icon-only button (year, list)
+    GAP   = 1.8 * mm
+    right = MARGIN + CONTENT_W
+    top   = PAGE_H - MARGIN
+    cy    = top - 13      # vertically centred in the header band
 
-    for i, (name, bm) in enumerate(icons):
-        cx = start_x + i * (SZ + GAP) + SZ / 2
-        col = C_ACCENT if name == active else C_SILVER
-        _draw_nav_icon(c, cx, cy, SZ, name, col)
-        if bm:
-            lx = cx - SZ / 2
-            ly = cy - SZ / 2
-            c.linkAbsolute("", bm, (lx, ly, lx + SZ, ly + SZ))
+    widths  = [BW_I if k in ("grid", "list") else BW_C for (_, k, _, _) in buttons]
+    total_w = sum(widths) + GAP * (len(buttons) - 1)
+    x = right - total_w
+
+    for (name, kind, label, bm), bw in zip(buttons, widths):
+        cx  = x + bw / 2
+        col = C_ACCENT if name == active else C_GREY
+        if kind == "grid":
+            _draw_grid_icon(c, cx, cy, BH * 0.9, col)
+        elif kind == "list":
+            _draw_list_icon(c, cx, cy, BH * 0.9, col)
+        else:
+            _draw_cal_button(c, cx, cy, bw, BH, label, col)
+        if bm and bm in valid:
+            c.linkAbsolute("", bm, (cx - bw / 2, cy - BH / 2, cx + bw / 2, cy + BH / 2))
+        x += bw + GAP
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1402,6 +1422,16 @@ def build_planner(
     while w <= last_mon:
         weeks.append(w)
         w += timedelta(days=7)
+
+    # Nav context: today + the set of bookmarks that actually exist, so the
+    # top "jump to today" calendar buttons only link to real pages.
+    global _NAV_TODAY, _NAV_VALID_BMS
+    _NAV_TODAY = datetime.now(tz).date()
+    _NAV_VALID_BMS = {YEAR_BM}
+    _NAV_VALID_BMS |= {f"month_{y}_{m:02d}" for (y, m) in months}
+    _NAV_VALID_BMS |= {f"week_{wm.isoformat()}" for wm in weeks}
+    _NAV_VALID_BMS |= {f"day_{(wm + timedelta(days=i)).isoformat()}"
+                       for wm in weeks for i in range(5)}
 
     # Group events by month and by day
     ev_by_month: dict[tuple, list] = {m: [] for m in months}
