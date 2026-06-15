@@ -836,7 +836,7 @@ def draw_month_page(c: canvas.Canvas, year: int, month: int,
       pills below the number
     • Ruled notes area along the bottom
     """
-    today        = date.today()
+    today        = datetime.now(tz).date()
     month_name   = datetime(year, month, 1).strftime("%B").upper()
     is_cur_month = (year == today.year and month == today.month)
 
