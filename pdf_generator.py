@@ -1873,11 +1873,11 @@ def build_planner(
       2. Weekly spread pages   (one per ISO week in range)
       3. Meeting note pages    (one per timed event)
     """
-    if not start_date: start_date = date.today()
-    if not end_date:   end_date   = start_date + timedelta(days=30)
-
     try:   tz = ZoneInfo(timezone_name)
     except Exception: tz = ZoneInfo("UTC")
+
+    if not start_date: start_date = datetime.now(tz).date()
+    if not end_date:   end_date   = start_date + timedelta(days=30)
 
     # Months
     months = []

@@ -43,6 +43,10 @@ from rm_uploader import RemarkableUploader
 # How many days ahead to generate the planner for
 DEFAULT_DAYS_AHEAD = 14
 
+# Timezone used to place events and date the planner (IANA name, e.g.
+# "Australia/Brisbane"). Override per-run with --tz.
+TIMEZONE = "UTC"
+
 # Folder on the reMarkable to upload into
 RM_FOLDER = "/PolarisFolio"
 
@@ -73,8 +77,15 @@ def cmd_setup(args):
 
 
 def cmd_run(args):
-    # Date range
-    start = date.today()
+    from zoneinfo import ZoneInfo
+    tz_name = getattr(args, "tz", None) or TIMEZONE
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz_name, tz = "UTC", ZoneInfo("UTC")
+
+    # Date range (today in the configured timezone)
+    start = datetime.now(tz).date()
     end = start + timedelta(days=DEFAULT_DAYS_AHEAD)
 
     if args.start:
@@ -119,8 +130,8 @@ def cmd_run(args):
 
     print()
     print("Fetching calendar events...")
-    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=tz)
+    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=tz)
     events = manager.get_events(start_dt, end_dt)
 
     print(f"\nTotal events: {len(events)}")
@@ -140,6 +151,7 @@ def cmd_run(args):
         start_date=start,
         end_date=end,
         title=f"PolarisFolio {start.strftime('%B %Y')}",
+        timezone_name=tz_name,
     )
 
     size_kb = os.path.getsize(output_path) / 1024
@@ -194,6 +206,8 @@ def main():
                             help="Generate PDF but do not upload to reMarkable")
     run_parser.add_argument("--output", metavar="PATH",
                             help=f"Output PDF path (default: {PDF_OUTPUT})")
+    run_parser.add_argument("--tz", metavar="ZONE",
+                            help=f"Timezone (IANA name, default: {TIMEZONE})")
 
     args = parser.parse_args()
 

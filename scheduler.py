@@ -37,6 +37,7 @@ async def _scheduled_generate():
     from rm_uploader import RemarkableUploader
     import os
     from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
 
     enabled = await get_setting("schedule_enabled", "0")
     if enabled != "1":
@@ -46,8 +47,12 @@ async def _scheduled_generate():
     upload = (await get_setting("schedule_upload", "0")) == "1"
     rm_folder = await get_setting("rm_folder", "/PolarisFolio")
     tz_name = await get_setting("timezone", "UTC")
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz_name, tz = "UTC", ZoneInfo("UTC")
 
-    start = date.today()
+    start = datetime.now(tz).date()
     end = start + timedelta(weeks=weeks_ahead)
 
     manager = CalendarManager()
@@ -82,8 +87,8 @@ async def _scheduled_generate():
         print("Scheduler: no calendar sources configured, skipping")
         return
 
-    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=tz)
+    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=tz)
     events = manager.get_events(start_dt, end_dt)
 
     PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")

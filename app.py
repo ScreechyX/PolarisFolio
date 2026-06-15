@@ -327,7 +327,12 @@ async def generate_page(request: Request, success: str = None, error: str = None
     feeds = await get_ical_feeds(enabled_only=True)
     has_sources = ms_ok or len(feeds) > 0
 
-    today = date.today()
+    from zoneinfo import ZoneInfo
+    try:
+        _tz = ZoneInfo(await get_setting("timezone", "UTC"))
+    except Exception:
+        _tz = ZoneInfo("UTC")
+    today = datetime.now(_tz).date()
     default_end = today + timedelta(days=30)
 
     return templates.TemplateResponse(request, "generate.html", {
