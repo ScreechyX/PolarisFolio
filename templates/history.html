@@ -88,22 +88,21 @@
 
 {% if generating %}
 <script>
-  // Poll until a new upload appears, then redirect cleanly (strips ?generating=1)
-  const knownLatest = {{ ('"' + uploads[0].created_at + '"') if uploads else 'null' }};
-
+  // Poll the server's in-flight flag; once generation finishes, reload to a
+  // clean URL so the banner clears and the new planner is shown.
   async function pollForCompletion() {
     try {
-      const res = await fetch('/api/history/count');
+      const res = await fetch('/api/generating');
       const data = await res.json();
-      if (data.latest && data.latest !== knownLatest) {
+      if (!data.active) {
         window.location.href = '/history';
         return;
       }
     } catch {}
-    setTimeout(pollForCompletion, 5000);
+    setTimeout(pollForCompletion, 3000);
   }
 
-  setTimeout(pollForCompletion, 5000);
+  setTimeout(pollForCompletion, 3000);
 </script>
 {% endif %}
 

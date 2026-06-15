@@ -347,6 +347,11 @@ async def generate_page(request: Request, success: str = None, error: str = None
     })
 
 
+# Number of planner generations currently in flight. The history page polls
+# this so the "Generating…" banner clears reliably once the work is done.
+_active_generations = 0
+
+
 @app.post("/generate")
 async def run_generate(
     background_tasks: BackgroundTasks,
@@ -364,7 +369,11 @@ async def run_generate(
     if end < start:
         return RedirectResponse("/generate?error=end_before_start", status_code=303)
 
-    # Run generation in background, redirect to history
+    # Mark a generation in flight up-front (before the task starts) so the
+    # banner shows immediately and the poll can't miss it.
+    global _active_generations
+    _active_generations += 1
+
     background_tasks.add_task(
         _run_generation,
         start, end,
@@ -375,13 +384,24 @@ async def run_generate(
     return RedirectResponse("/history?generating=1", status_code=303)
 
 
-async def _run_generation(
+async def _run_generation(start: date, end: date, upload: bool, rm_folder: str):
+    """Background task wrapper — always clears the in-flight counter."""
+    global _active_generations
+    try:
+        await _do_generation(start, end, upload, rm_folder)
+    except Exception as e:
+        print(f"Generation error: {e}")
+    finally:
+        _active_generations = max(0, _active_generations - 1)
+
+
+async def _do_generation(
     start: date,
     end: date,
     upload: bool,
     rm_folder: str,
 ):
-    """Background task: pull calendar, generate PDF, optionally upload."""
+    """Pull calendar, generate PDF, optionally upload."""
     from calendar_manager import CalendarManager
     from pdf_generator import build_planner
     from rm_uploader import RemarkableUploader
@@ -456,12 +476,20 @@ async def _run_generation(
 # History
 # ---------------------------------------------------------------------------
 
+@app.get("/api/generating")
+async def api_generating():
+    """Whether any planner generation is currently in flight."""
+    return JSONResponse({"active": _active_generations > 0})
+
+
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(request: Request, generating: str = None):
     uploads = await get_uploads(limit=50)
+    # Show the banner if asked to (?generating=1) or if work is actually running
+    show_generating = (generating == "1") or (_active_generations > 0)
     return templates.TemplateResponse(request, "history.html", {
         "uploads": uploads,
-        "generating": generating == "1",
+        "generating": show_generating,
         "active": "history",
     })
 
