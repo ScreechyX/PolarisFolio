@@ -56,3 +56,9 @@ logs/
 
 # Node (if frontend tooling ever added)
 node_modules/
+
+# Cloudflare Wrangler local state / account cache
+.wrangler/
+
+# Outlook / mailbox exports (never commit — large + sensitive)
+*.pst
