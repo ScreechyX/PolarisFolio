@@ -1692,9 +1692,13 @@ def build_planner(
         months.append((cur.year, cur.month))
         cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
 
-    # Weeks (Mon–Fri)
-    first_mon = _week_monday(start_date)
-    last_mon  = _week_monday(end_date)
+    # Weeks (Mon–Fri). Cover every week shown in the month grids — not just the
+    # start→end range — so each week indicator on a month page is clickable.
+    first_month_day = date(months[0][0], months[0][1], 1)
+    last_y, last_m  = months[-1]
+    last_month_day  = date(last_y, last_m, calendar.monthrange(last_y, last_m)[1])
+    first_mon = _week_monday(min(start_date, first_month_day))
+    last_mon  = _week_monday(max(end_date, last_month_day))
     weeks = []
     w = first_mon
     while w <= last_mon:
