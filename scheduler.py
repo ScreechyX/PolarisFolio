@@ -123,6 +123,10 @@ async def _scheduled_generate():
             # force=False: never overwrite an existing dated doc (protect notes)
             uploaded = await asyncio.to_thread(
                 uploader.upload, display_name, pdf_path, folder=rm_folder, force=False)
+            # Keep only the most recent N dated planners on the device.
+            keep_days = int(await get_setting("schedule_keep_days", "5"))
+            await asyncio.to_thread(
+                uploader.prune_old_dated, keep_days, rm_folder)
         except Exception as e:
             print(f"Scheduler: upload error - {e}")
 
