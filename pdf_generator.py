@@ -2140,6 +2140,29 @@ def _build_planner_impl(
 LAYOUT_VERSION = 1
 
 
+def event_qualifies_for_slot(event, mode: str = "attendees",
+                             self_email: str = None) -> bool:
+    """Whether an event should get a permanent per-meeting note page.
+
+    All-day events never qualify. Otherwise:
+      - "all":       every timed event qualifies (legacy behaviour)
+      - "attendees": only real meetings — at least one attendee other than the
+                     user (filters out personal blocks / solo holds). Falls back
+                     to "any attendee present" when the user's email is unknown.
+    """
+    if getattr(event, "is_all_day", False):
+        return False
+    if mode == "all":
+        return True
+    # "attendees"
+    atts = getattr(event, "attendees", None) or []
+    if self_email:
+        others = [a for a in atts
+                  if not (a.email and a.email.lower() == self_email.lower())]
+        return len(others) >= 1
+    return len(atts) >= 1
+
+
 def yearly_geometry_signature(year: int, slot_count: int) -> str:
     """Stable identifier for a year's page geometry. If this changes, the live
     document must be recreated (not updated in place) to stay ink-aligned."""

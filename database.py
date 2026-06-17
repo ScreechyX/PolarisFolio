@@ -211,6 +211,18 @@ async def count_meeting_slots(year: int) -> int:
             return row[0] if row else 0
 
 
+async def clear_meeting_slots(year: int):
+    """Drop all slot assignments for a year.
+
+    Only safe to call when the document is being recreated (handwriting is being
+    reset anyway) — e.g. the slot count or slot filter changed. Lets the next
+    run re-assign slots cleanly instead of inheriting stale assignments.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM meeting_slots WHERE year = ?", (year,))
+        await db.commit()
+
+
 async def assign_meeting_slots(year: int, events: list, pool_size: int) -> dict:
     """
     Ensure every event has a stable page slot for `year`, returning the full

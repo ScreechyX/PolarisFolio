@@ -206,6 +206,18 @@
           </small>
         </div>
 
+        <div class="form-group" id="filterGroup">
+          <label>Which meetings get a note page</label>
+          {% set sfilter = settings.get('slot_filter', 'attendees') %}
+          <select name="slot_filter">
+            <option value="attendees" {% if sfilter == 'attendees' %}selected{% endif %}>Meetings with attendees</option>
+            <option value="all" {% if sfilter == 'all' %}selected{% endif %}>Every timed meeting</option>
+          </select>
+          <small style="color: var(--ink-3);">
+            "With attendees" skips personal blocks / solo holds so slots go to real meetings. Use "Every timed meeting" if your feed has no attendee data. Changing this rebuilds the planner.
+          </small>
+        </div>
+
         <div class="form-group" id="keepDaysGroup">
           <label>Keep last N dated docs (dated)</label>
           <input type="number" name="schedule_keep_days" min="0"
@@ -272,9 +284,11 @@
   function toggleSyncMode() {
     const mode = document.getElementById('syncMode').value;
     const slots = document.getElementById('slotsGroup');
+    const filter = document.getElementById('filterGroup');
     const keep = document.getElementById('keepDaysGroup');
     const status = document.getElementById('rollingStatus');
     if (slots) slots.style.display = (mode === 'rolling') ? '' : 'none';
+    if (filter) filter.style.display = (mode === 'rolling') ? '' : 'none';
     if (keep) keep.style.display = (mode === 'dated') ? '' : 'none';
     if (status) status.style.display = (mode === 'rolling') ? '' : 'none';
   }
