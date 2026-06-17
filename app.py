@@ -22,6 +22,10 @@ import os
 import shutil
 import uuid
 import asyncio
+import hmac
+import hashlib
+import json
+import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -480,6 +484,57 @@ async def _do_generation(
 async def api_generating():
     """Whether any planner generation is currently in flight."""
     return JSONResponse({"active": _active_generations > 0})
+
+
+@app.post("/webhook/github")
+async def github_webhook(request: Request):
+    """
+    Auto-deploy hook: GitHub calls this on every push. We verify the HMAC
+    signature, and on a push to the configured branch fire update.sh
+    (git pull + restart) detached so it survives our own restart.
+
+    Configure the shared secret via the GITHUB_WEBHOOK_SECRET env var (set it
+    in the systemd unit) or the 'github_webhook_secret' setting. The deploy
+    branch is GITHUB_DEPLOY_BRANCH / 'github_webhook_branch' (default 'main').
+    """
+    secret = (os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+              or await get_setting("github_webhook_secret", ""))
+    if not secret:
+        return JSONResponse({"error": "webhook not configured"}, status_code=503)
+
+    body = await request.body()
+    sent_sig = request.headers.get("X-Hub-Signature-256", "")
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sent_sig, expected):
+        return JSONResponse({"error": "bad signature"}, status_code=401)
+
+    event = request.headers.get("X-GitHub-Event", "")
+    if event == "ping":
+        return JSONResponse({"ok": True, "pong": True})
+    if event != "push":
+        return JSONResponse({"ok": True, "ignored_event": event})
+
+    try:
+        payload = json.loads(body or b"{}")
+    except ValueError:
+        return JSONResponse({"error": "bad payload"}, status_code=400)
+
+    branch = (os.environ.get("GITHUB_DEPLOY_BRANCH", "")
+              or await get_setting("github_webhook_branch", "") or "main")
+    if payload.get("ref") != f"refs/heads/{branch}":
+        return JSONResponse({"ok": True, "ignored_ref": payload.get("ref")})
+
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "update.sh")
+    if not os.path.exists(script):
+        return JSONResponse({"error": "update.sh missing"}, status_code=500)
+
+    # Detached so it outlives the service restart it triggers
+    subprocess.Popen(
+        ["/bin/bash", script],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return JSONResponse({"ok": True, "deploying": True, "branch": branch})
 
 
 @app.get("/history", response_class=HTMLResponse)

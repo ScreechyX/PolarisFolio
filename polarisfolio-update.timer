@@ -1,0 +1,11 @@
+[Unit]
+Description=PolarisFolio daily auto-update safety net
+
+[Timer]
+# Daily fallback in case a webhook push was missed (e.g. container was down).
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

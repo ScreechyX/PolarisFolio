@@ -95,9 +95,67 @@ Add a platform → Web → paste the redirect URI.
 ```bash
 ssh ubuntu@your-server-ip
 cd ~/polarisfolio_web
-# copy new files
+git pull
 sudo systemctl restart polarisfolio
 ```
+
+---
+
+## Auto-deploy from GitHub (webhook)
+
+The container can update itself on every push using a GitHub webhook that hits
+the built-in `POST /webhook/github` endpoint. It verifies an HMAC secret, then
+runs `update.sh` (git pull → reinstall deps if `requirements.txt` changed →
+restart the service) only when something actually changed.
+
+**1. Let the app user restart the service without a password.** As root:
+
+```bash
+# adjust the username to match polarisfolio.service's User=
+echo 'ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl restart polarisfolio' \
+  > /etc/sudoers.d/polarisfolio-update
+chmod 440 /etc/sudoers.d/polarisfolio-update
+visudo -c   # validate
+```
+
+**2. Set the webhook secret** (pick a long random value, e.g. `openssl rand -hex 32`).
+Add it to the service environment and reload:
+
+```bash
+sudo systemctl edit polarisfolio
+# In the editor, add:
+#   [Service]
+#   Environment=GITHUB_WEBHOOK_SECRET=<your-secret>
+#   Environment=GITHUB_DEPLOY_BRANCH=main
+sudo systemctl daemon-reload && sudo systemctl restart polarisfolio
+chmod +x update.sh
+```
+
+**3. Add the webhook on GitHub** — repo *Settings → Webhooks → Add webhook*:
+
+| Field | Value |
+|-------|-------|
+| Payload URL | `https://your-host/webhook/github` |
+| Content type | `application/json` |
+| Secret | the same secret as above |
+| Events | *Just the push event* |
+
+GitHub must be able to reach your host (public URL or a tunnel such as
+Cloudflare Tunnel). The “ping” GitHub sends on creation should return `200`.
+
+**4. (Optional) Daily safety-net timer** — re-pulls once a day in case a push
+webhook was ever missed:
+
+```bash
+sudo cp polarisfolio-update.service polarisfolio-update.timer /etc/systemd/system/
+# edit User=/WorkingDirectory=/ExecStart= paths in the .service if yours differ
+sudo systemctl daemon-reload
+sudo systemctl enable --now polarisfolio-update.timer
+systemctl list-timers polarisfolio-update.timer
+```
+
+Deploy activity is logged to `~/.polarisfolio_update.log`. You can trigger a
+manual deploy any time with `./update.sh`.
 
 ---
 

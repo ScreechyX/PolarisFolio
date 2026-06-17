@@ -25,6 +25,8 @@ Self-hosted reMarkable Paper Pro planner app. Pulls calendar events from Microso
 | `deploy.sh` | Single-command Proxmox LXC container setup |
 | `polarisfolio.service` | systemd unit file |
 | `nginx.conf` | Reverse proxy config |
+| `update.sh` | Auto-deploy: git pull + restart if changed (run by webhook/timer) |
+| `polarisfolio-update.{service,timer}` | Daily safety-net auto-update timer |
 
 ## Running locally
 ```bash

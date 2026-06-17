@@ -1,0 +1,11 @@
+[Unit]
+Description=PolarisFolio auto-update (git pull + restart if changed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Match the User/WorkingDirectory of polarisfolio.service
+User=ubuntu
+WorkingDirectory=/home/ubuntu/polarisfolio_web
+ExecStart=/home/ubuntu/polarisfolio_web/update.sh
