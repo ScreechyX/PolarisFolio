@@ -48,7 +48,8 @@ LOG="${POLARISFOLIO_UPDATE_LOG:-$HOME/.polarisfolio_update.log}"
     fi
   fi
 
-  echo "restarting $SERVICE"
+  # Log completion before the restart: restarting the service tears down this
+  # script's process group, so anything logged after it would be lost.
+  echo "deploy complete ($before -> $after) — restarting $SERVICE"
   sudo systemctl restart "$SERVICE"
-  echo "deploy complete ($after)"
 } >> "$LOG" 2>&1
