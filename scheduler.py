@@ -7,10 +7,13 @@ a planner on the configured schedule.
 
 Settings keys used:
   schedule_enabled   - "1" or "0"
-  schedule_day       - day of week: "mon", "tue", "wed", "thu", "fri", "sat", "sun"
+  schedule_day       - "daily" (every day) or a weekday: "mon".."sun"
   schedule_hour      - hour to run (0-23), e.g. "7"
   schedule_weeks_ahead - how many weeks forward to plan, e.g. "2"
   schedule_upload    - "1" to auto-upload to reMarkable, "0" to generate only
+
+Run "daily" to keep the relative-date pills (TODAY/TOMORROW/THIS WEEK) correct:
+a static PDF can't relabel itself, so it must be regenerated each morning.
 """
 
 import asyncio
@@ -132,7 +135,9 @@ async def _scheduled_generate():
 
 
 def _make_trigger(day: str, hour: int) -> CronTrigger:
-    return CronTrigger(day_of_week=DAY_MAP.get(day, "mon"), hour=hour, minute=0)
+    # "daily" → every day; otherwise the given weekday
+    dow = "*" if day == "daily" else DAY_MAP.get(day, "mon")
+    return CronTrigger(day_of_week=dow, hour=hour, minute=0)
 
 
 async def apply_schedule():

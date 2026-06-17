@@ -144,10 +144,10 @@
 
       <div class="grid-2" style="gap: 12px;">
         <div class="form-group">
-          <label>Day of week</label>
+          <label>Frequency</label>
           <select name="schedule_day">
             {% set sday = settings.get('schedule_day', 'mon') %}
-            {% for val, label in [('mon','Monday'),('tue','Tuesday'),('wed','Wednesday'),('thu','Thursday'),('fri','Friday'),('sat','Saturday'),('sun','Sunday')] %}
+            {% for val, label in [('daily','Every day (keeps "today" current)'),('mon','Monday'),('tue','Tuesday'),('wed','Wednesday'),('thu','Thursday'),('fri','Friday'),('sat','Saturday'),('sun','Sunday')] %}
             <option value="{{ val }}" {% if val == sday %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
