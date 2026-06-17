@@ -42,6 +42,9 @@ Open http://localhost:8000
 - PDFs stored in `~/polarisfolio_pdfs/`
 - DB at `~/.polarisfolio_web.db` (override with `POLARISFOLIO_DB` env var)
 - Timezone: events are stored/compared as UTC; user-facing display uses the timezone setting (see `settings` table key `timezone`)
+- Scheduled sync has two modes (`settings` key `sync_mode`):
+  - `rolling` (default): one fixed-geometry yearly planner (`pdf_generator.build_yearly_planner`) re-synced **in place** via `rmapi put --content-only`, which keeps the document ID and every `.rm` handwriting layer. Requires constant page count/order/size for the year, so each meeting gets a permanent page slot persisted in the `meeting_slots` table (`database.assign_meeting_slots`) — a meeting's note page (and its ink) stays put even when it is rescheduled. The geometry signature (`yearly_geometry_signature`) gates in-place update vs. full recreate (`--force`).
+  - `dated`: a new dated document per run, old ones pruned (`RemarkableUploader.prune_old_dated`, key `schedule_keep_days`).
 
 ## Not yet built
 - Auth/login wall for web UI

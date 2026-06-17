@@ -2,9 +2,12 @@
 Database layer. SQLite via aiosqlite.
 
 Tables:
-  settings     - key/value app config (MS client ID, RM token, etc.)
-  ical_feeds   - saved ICS feed URLs
-  uploads      - history of generated planners
+  settings      - key/value app config (MS client ID, RM token, etc.)
+  ical_feeds    - saved ICS feed URLs
+  uploads       - history of generated planners
+  meeting_slots - stable event_id -> page slot map for the rolling yearly
+                  planner, so a meeting's note page (and its handwriting)
+                  keeps a fixed position even when the meeting moves
 """
 
 import os
@@ -39,9 +42,26 @@ async def init_db():
                 event_count  INTEGER DEFAULT 0,
                 pdf_path     TEXT,
                 uploaded_to_rm INTEGER DEFAULT 0,
+                sync_action  TEXT,
                 created_at   TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS meeting_slots (
+                year      INTEGER NOT NULL,
+                event_id  TEXT NOT NULL,
+                slot      INTEGER NOT NULL,
+                title     TEXT,
+                last_seen TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (year, event_id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_meeting_slots_year_slot
+                ON meeting_slots (year, slot);
         """)
+        # Migration: add sync_action to uploads tables created before it existed.
+        try:
+            await db.execute("ALTER TABLE uploads ADD COLUMN sync_action TEXT")
+        except Exception:
+            pass  # column already present
         await db.commit()
 
 
@@ -120,13 +140,16 @@ async def add_upload(
     event_count: int,
     pdf_path: str,
     uploaded_to_rm: bool = False,
+    sync_action: str = None,
 ) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             """INSERT INTO uploads
-               (display_name, start_date, end_date, event_count, pdf_path, uploaded_to_rm)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (display_name, start_date, end_date, event_count, pdf_path, 1 if uploaded_to_rm else 0)
+               (display_name, start_date, end_date, event_count, pdf_path,
+                uploaded_to_rm, sync_action)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (display_name, start_date, end_date, event_count, pdf_path,
+             1 if uploaded_to_rm else 0, sync_action)
         )
         await db.commit()
         return cur.lastrowid
@@ -164,3 +187,63 @@ async def get_uploads(limit=20) -> list[dict]:
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+# -- Meeting slots (rolling yearly planner) ----------------------------------
+
+async def get_meeting_slots(year: int) -> dict:
+    """Return {event_id: slot} for a year's already-assigned meeting pages."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT event_id, slot FROM meeting_slots WHERE year = ?", (year,)
+        ) as cur:
+            rows = await cur.fetchall()
+            return {r[0]: r[1] for r in rows}
+
+
+async def count_meeting_slots(year: int) -> int:
+    """How many page slots are claimed for `year` (reserved, never reused)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM meeting_slots WHERE year = ?", (year,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+
+async def assign_meeting_slots(year: int, events: list, pool_size: int) -> dict:
+    """
+    Ensure every event has a stable page slot for `year`, returning the full
+    {event_id: slot} map.
+
+    Slots are assigned once and never moved or reused: a meeting keeps its slot
+    (and therefore its on-device note page and handwriting) even if it is
+    rescheduled, and a deleted meeting's slot stays reserved so its slot is
+    never handed to a different meeting. New meetings take the lowest free slot.
+    `events` should be pre-sorted (e.g. by start time) so first-time assignment
+    is deterministic. Events beyond `pool_size` get no dedicated slot.
+    """
+    existing = await get_meeting_slots(year)
+    used = set(existing.values())
+    free = [i for i in range(pool_size) if i not in used]
+    fi = 0
+    to_add = []
+    for e in events:
+        eid = e.id
+        if eid in existing:
+            continue
+        if fi >= len(free):
+            break  # pool exhausted — meeting still shows on day/week pages
+        slot = free[fi]; fi += 1
+        existing[eid] = slot
+        to_add.append((year, eid, slot, (e.title or "")[:200]))
+
+    if to_add:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.executemany(
+                """INSERT OR IGNORE INTO meeting_slots (year, event_id, slot, title)
+                   VALUES (?, ?, ?, ?)""",
+                to_add,
+            )
+            await db.commit()
+    return existing

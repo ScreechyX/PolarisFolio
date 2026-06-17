@@ -577,10 +577,41 @@ async def settings_page(request: Request, success: str = None, error: str = None
     settings = await get_all_settings()
     ms_ok = await ms_connected()
 
+    # Rolling-sync status: live document, slot usage, and whether the next run
+    # will update in place or recreate (which resets handwriting).
+    rolling = None
+    if settings.get("sync_mode", "rolling") == "rolling":
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from database import count_meeting_slots
+        from pdf_generator import yearly_geometry_signature
+        try:
+            tz = ZoneInfo(settings.get("timezone") or "UTC")
+        except Exception:
+            tz = ZoneInfo("UTC")
+        year = datetime.now(tz).year
+        try:
+            slot_count = int(settings.get("sync_meeting_slots", "200"))
+        except (TypeError, ValueError):
+            slot_count = 200
+        used = await count_meeting_slots(year)
+        sig = yearly_geometry_signature(year, slot_count)
+        live_sig = settings.get("sync_live_sig", "")
+        rolling = {
+            "doc_name": (settings.get("rm_doc_name") or f"PolarisFolio {year}").strip(),
+            "year": year,
+            "slot_count": slot_count,
+            "slots_used": used,
+            "slots_pct": round(100 * used / slot_count) if slot_count else 0,
+            "next_in_place": bool(live_sig) and live_sig == sig,
+            "live": bool(live_sig),
+        }
+
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings,
         "ms_connected": ms_ok,
         "rmapi_ok": shutil.which("rmapi") is not None,
+        "rolling": rolling,
         "success": success,
         "error": error,
         "active": "settings",
@@ -602,6 +633,9 @@ async def save_settings(
     schedule_hour: str = Form("7"),
     schedule_weeks_ahead: str = Form("2"),
     schedule_upload: str = Form("0"),
+    sync_mode: str = Form("rolling"),
+    sync_meeting_slots: str = Form("200"),
+    schedule_keep_days: str = Form("5"),
 ):
     if ms_client_id:
         await set_setting("ms_client_id", ms_client_id.strip())
@@ -618,6 +652,17 @@ async def save_settings(
     await set_setting("schedule_hour", schedule_hour)
     await set_setting("schedule_weeks_ahead", schedule_weeks_ahead)
     await set_setting("schedule_upload", schedule_upload)
+    await set_setting("sync_mode", sync_mode if sync_mode in ("rolling", "dated") else "rolling")
+    try:
+        slots = max(0, min(1000, int(sync_meeting_slots)))
+    except (TypeError, ValueError):
+        slots = 200
+    await set_setting("sync_meeting_slots", str(slots))
+    try:
+        keep = max(0, int(schedule_keep_days))
+    except (TypeError, ValueError):
+        keep = 5
+    await set_setting("schedule_keep_days", str(keep))
 
     await apply_schedule()
 

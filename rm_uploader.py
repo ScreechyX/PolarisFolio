@@ -7,9 +7,13 @@ authenticate with your reMarkable account.
 """
 
 import os
+import re
 import shutil
 import tempfile
 import subprocess
+
+# Dated auto-planner docs are named "PolarisFolio YYYY-MM-DD" (see scheduler.py).
+_DATED_DOC_RE = re.compile(r"^PolarisFolio (\d{4}-\d{2}-\d{2})$")
 
 
 def _rmapi_available() -> bool:
@@ -88,3 +92,130 @@ class RemarkableUploader:
             except Exception as e:
                 print(f"  rmapi: unexpected error - {e}")
                 return False
+
+    def update_in_place(self, display_name: str, pdf_path: str,
+                        folder: str = None, content_only: bool = True) -> bool:
+        """
+        Replace the PDF of the persistent yearly planner *in place*, preserving
+        the document ID and every handwritten annotation layer.
+
+        `content_only=True`  → `rmapi put --content-only` swaps only the PDF on an
+                               existing same-named document, keeping all ink. Use
+                               when the page geometry is unchanged.
+        `content_only=False` → `rmapi put --force` deletes and recreates the
+                               document (new ID, ink dropped). Use for the very
+                               first upload, or when the page geometry changed
+                               (see pdf_generator.yearly_geometry_signature) and
+                               an in-place swap would misalign annotations.
+
+        Returns True on success.
+        """
+        if not _rmapi_available():
+            print("  rmapi not found on PATH.")
+            return False
+        if not os.path.exists(pdf_path):
+            print(f"  Error: file not found - {pdf_path}")
+            return False
+
+        target_folder = (folder or self.folder or "/PolarisFolio").rstrip("/")
+        home = os.path.expanduser("~")
+        env = {**os.environ, "HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config")}
+
+        try:
+            subprocess.run(["rmapi", "mkdir", target_folder],
+                           capture_output=True, text=True, timeout=30, env=env)
+        except Exception:
+            pass
+
+        safe_name = (display_name or "PolarisFolio").replace("/", "-").strip()
+        mode = "in place (notes preserved)" if content_only else "recreate"
+        size_kb = os.path.getsize(pdf_path) / 1024
+        print(f"\nSyncing '{safe_name}' ({size_kb:.0f} KB) to {target_folder} — {mode}...")
+
+        with tempfile.TemporaryDirectory() as td:
+            staged = os.path.join(td, f"{safe_name}.pdf")
+            try:
+                shutil.copy2(pdf_path, staged)
+            except Exception as e:
+                print(f"  staging error: {e}")
+                return False
+
+            flag = "--content-only" if content_only else "--force"
+            cmd = ["rmapi", "put", flag, staged, target_folder]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True,
+                                        timeout=180, env=env)
+            except subprocess.TimeoutExpired:
+                print("  rmapi: sync timed out")
+                return False
+            except Exception as e:
+                print(f"  rmapi: unexpected error - {e}")
+                return False
+
+            if result.returncode == 0:
+                print(f"  rmapi: synced '{safe_name}' ({mode})")
+                return True
+
+            err = (result.stderr.strip() or result.stdout.strip())
+            # --content-only requires the document to already exist; if it does
+            # not yet (or rmapi can't match it), fall back to creating it once.
+            if content_only and ("not found" in err.lower()
+                                 or "exist" in err.lower()
+                                 or "no such" in err.lower()):
+                print(f"  rmapi: no existing doc to update, creating it — {err}")
+                return self.update_in_place(display_name, pdf_path, folder,
+                                            content_only=False)
+            print(f"  rmapi error: {err}")
+            return False
+
+    def prune_old_dated(self, keep: int = 5, folder: str = None) -> int:
+        """
+        Delete old dated auto-planner docs, keeping only the `keep` most recent.
+
+        Targets only documents named "PolarisFolio YYYY-MM-DD" in `folder`, so
+        the manually generated working planner and any other files are left
+        alone. Returns the number of documents removed.
+        """
+        if keep < 0 or not _rmapi_available():
+            return 0
+
+        target_folder = (folder or self.folder or "/PolarisFolio").rstrip("/")
+        home = os.path.expanduser("~")
+        env = {**os.environ, "HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config")}
+
+        try:
+            result = subprocess.run(["rmapi", "ls", target_folder],
+                                    capture_output=True, text=True, timeout=30, env=env)
+        except Exception as e:
+            print(f"  rmapi: prune list error - {e}")
+            return 0
+        if result.returncode != 0:
+            return 0
+
+        dated = []  # (date_str, doc_name)
+        for line in result.stdout.splitlines():
+            # rmapi ls lines look like "[f]\tPolarisFolio 2026-06-17"
+            name = line.split("\t", 1)[-1].strip() if "\t" in line else line.strip()
+            name = re.sub(r"^\[[df]\]\s*", "", name).strip()
+            m = _DATED_DOC_RE.match(name)
+            if m:
+                dated.append((m.group(1), name))
+
+        # Newest first; keep the first `keep`, delete the rest.
+        dated.sort(reverse=True)
+        to_delete = dated[keep:]
+        removed = 0
+        for _, name in to_delete:
+            doc_path = f"{target_folder}/{name}"
+            try:
+                rm = subprocess.run(["rmapi", "rm", doc_path],
+                                    capture_output=True, text=True, timeout=30, env=env)
+                if rm.returncode == 0:
+                    print(f"  rmapi: pruned old planner '{name}'")
+                    removed += 1
+                else:
+                    err = rm.stderr.strip() or rm.stdout.strip()
+                    print(f"  rmapi: could not prune '{name}' - {err}")
+            except Exception as e:
+                print(f"  rmapi: prune error on '{name}' - {e}")
+        return removed

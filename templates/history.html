@@ -61,6 +61,16 @@
             {% else %}
             <span class="badge badge-grey">local only</span>
             {% endif %}
+            {% set action = upload.sync_action %}
+            {% if action == 'in_place' %}
+            <br><span class="badge badge-green" title="Swapped in place — handwriting preserved">updated in place</span>
+            {% elif action == 'recreated' %}
+            <br><span class="badge badge-orange" title="Page geometry changed — document recreated, previous ink dropped">recreated</span>
+            {% elif action == 'upload_failed' %}
+            <br><span class="badge badge-red" title="PDF generated but the device sync failed">upload failed</span>
+            {% elif action == 'dated' %}
+            <br><span class="badge badge-grey">dated doc</span>
+            {% endif %}
           </td>
           <td style="text-align: right;">
             <a href="/download/{{ upload.id }}" class="btn btn-secondary btn-sm">Download PDF</a>
