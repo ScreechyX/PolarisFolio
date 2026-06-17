@@ -602,6 +602,9 @@ async def save_settings(
     schedule_hour: str = Form("7"),
     schedule_weeks_ahead: str = Form("2"),
     schedule_upload: str = Form("0"),
+    sync_mode: str = Form("rolling"),
+    sync_meeting_slots: str = Form("200"),
+    schedule_keep_days: str = Form("5"),
 ):
     if ms_client_id:
         await set_setting("ms_client_id", ms_client_id.strip())
@@ -618,6 +621,17 @@ async def save_settings(
     await set_setting("schedule_hour", schedule_hour)
     await set_setting("schedule_weeks_ahead", schedule_weeks_ahead)
     await set_setting("schedule_upload", schedule_upload)
+    await set_setting("sync_mode", sync_mode if sync_mode in ("rolling", "dated") else "rolling")
+    try:
+        slots = max(0, min(1000, int(sync_meeting_slots)))
+    except (TypeError, ValueError):
+        slots = 200
+    await set_setting("sync_meeting_slots", str(slots))
+    try:
+        keep = max(0, int(schedule_keep_days))
+    except (TypeError, ValueError):
+        keep = 5
+    await set_setting("schedule_keep_days", str(keep))
 
     await apply_schedule()
 

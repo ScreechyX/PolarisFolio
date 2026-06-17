@@ -11,6 +11,12 @@ Settings keys used:
   schedule_hour      - hour to run (0-23), e.g. "7"
   schedule_weeks_ahead - how many weeks forward to plan, e.g. "2"
   schedule_upload    - "1" to auto-upload to reMarkable, "0" to generate only
+  sync_mode          - "rolling" (one fixed yearly planner, updated in place so
+                       handwriting is preserved) or "dated" (a new dated doc per
+                       run, old ones pruned). Default "rolling".
+  sync_meeting_slots - rolling mode: fixed number of per-meeting note pages
+                       reserved in the yearly planner (default 200)
+  schedule_keep_days - dated mode: how many recent dated docs to keep (default 5)
 
 Run "daily" to keep the relative-date pills (TODAY/TOMORROW/THIS WEEK) correct:
 a static PDF can't relabel itself, so it must be regenerated each morning.
@@ -41,6 +47,8 @@ async def _scheduled_generate():
     import os
     from datetime import datetime, timezone
     from zoneinfo import ZoneInfo
+
+    sync_mode = await get_setting("sync_mode", "rolling")
 
     enabled = await get_setting("schedule_enabled", "0")
     if enabled != "1":
@@ -91,6 +99,14 @@ async def _scheduled_generate():
         return
 
     import asyncio
+
+    # Rolling mode: one fixed yearly planner, updated in place so handwriting
+    # is preserved (see _run_rolling_sync). Default behaviour.
+    if sync_mode == "rolling":
+        await _run_rolling_sync(manager, tz, tz_name, rm_folder, upload)
+        return
+
+    # ── Dated mode: a fresh dated document each run, old ones pruned ───────────
     start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=tz)
     end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=tz)
     # Blocking network I/O — keep it off the shared event loop.
@@ -139,6 +155,81 @@ async def _scheduled_generate():
         uploaded_to_rm=uploaded,
     )
     print(f"Scheduler: generated {display_name} ({len(events)} events)")
+
+
+async def _run_rolling_sync(manager, tz, tz_name, rm_folder, upload):
+    """
+    Generate/refresh the single fixed-geometry yearly planner and sync it to the
+    reMarkable *in place*, preserving existing handwriting.
+
+    The whole calendar year is pulled so every page is current. Each meeting is
+    given a permanent page slot (database.assign_meeting_slots), so its note page
+    — and the ink on it — stays put even when the meeting is rescheduled. When
+    the page geometry is unchanged from the live document we use
+    `rmapi put --content-only` (keeps the doc ID + all annotations); when it
+    changed (new year, slot count, week count or layout) we recreate the doc so
+    annotations can't land on the wrong pages.
+    """
+    import os
+    import asyncio
+    from datetime import datetime
+    from database import (get_setting, set_setting, assign_meeting_slots,
+                          add_upload)
+    from pdf_generator import build_yearly_planner, yearly_geometry_signature
+    from rm_uploader import RemarkableUploader
+
+    year       = datetime.now(tz).year
+    slot_count = int(await get_setting("sync_meeting_slots", "200"))
+    doc_name   = (await get_setting("rm_doc_name", "")).strip() or f"PolarisFolio {year}"
+
+    # Pull the full year so the fixed planner reflects the current calendar.
+    year_start = datetime(year, 1, 1, 0, 0, 0, tzinfo=tz)
+    year_end   = datetime(year, 12, 31, 23, 59, 59, tzinfo=tz)
+    events = await asyncio.to_thread(manager.get_events, year_start, year_end)
+
+    # Stable per-meeting slot assignment (sorted so first-time slots are
+    # deterministic; existing slots are never moved).
+    timed = sorted([e for e in events if not e.is_all_day], key=lambda e: e.start)
+    slot_map = await assign_meeting_slots(year, timed, slot_count)
+
+    PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")
+    os.makedirs(PDF_DIR, exist_ok=True)
+    pdf_path = os.path.join(PDF_DIR, f"polarisfolio_{year}_rolling.pdf")
+
+    self_email = (await get_setting("ms_user_email", "")).strip() or None
+
+    await asyncio.to_thread(
+        build_yearly_planner,
+        events=events, output_path=pdf_path, year=year,
+        slot_map=slot_map, slot_count=slot_count,
+        timezone_name=tz_name, self_email=self_email, title=doc_name)
+
+    sig          = yearly_geometry_signature(year, slot_count)
+    live_sig     = await get_setting("sync_live_sig", "")
+    content_only = (live_sig == sig)
+
+    uploaded = False
+    if upload and os.path.exists(pdf_path):
+        try:
+            uploader = RemarkableUploader()
+            uploaded = await asyncio.to_thread(
+                uploader.update_in_place, doc_name, pdf_path, rm_folder, content_only)
+            if uploaded:
+                # Record the geometry now live on the device.
+                await set_setting("sync_live_sig", sig)
+        except Exception as e:
+            print(f"Scheduler: rolling sync error - {e}")
+
+    await add_upload(
+        display_name=doc_name,
+        start_date=year_start.date().isoformat(),
+        end_date=year_end.date().isoformat(),
+        event_count=len(events),
+        pdf_path=pdf_path,
+        uploaded_to_rm=uploaded,
+    )
+    print(f"Scheduler: rolling sync {doc_name} ({len(events)} events, "
+          f"{'updated in place' if content_only else 'recreated'})")
 
 
 def _make_trigger(day: str, hour: int) -> CronTrigger:

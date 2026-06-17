@@ -2117,6 +2117,268 @@ def _build_planner_impl(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Fixed-geometry yearly planner  (rolling in-place sync with preserved ink)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Unlike build_planner (variable page count), this produces a document whose
+# page COUNT, ORDER and SIZE are constant for the whole calendar year:
+#
+#   1 year page
+#   + 12 month pages, each followed by its weeks and their Mon–Fri day pages
+#   + a FIXED pool of `slot_count` meeting-note pages (filled or blank)
+#   + 1 meetings agenda page
+#
+# Because the geometry never changes within a year, the PDF can be swapped on
+# the device in place (rmapi put --content-only), which keeps the document ID
+# and every .rm handwriting layer. Each meeting always renders onto its own
+# permanent slot page (see database.assign_meeting_slots), so a meeting's notes
+# follow it even when it is rescheduled.
+#
+# LAYOUT_VERSION bumps whenever the page set changes shape; the scheduler folds
+# it into the geometry signature so a layout change triggers a fresh document
+# rather than a misaligned in-place swap.
+LAYOUT_VERSION = 1
+
+
+def yearly_geometry_signature(year: int, slot_count: int) -> str:
+    """Stable identifier for a year's page geometry. If this changes, the live
+    document must be recreated (not updated in place) to stay ink-aligned."""
+    weeks = _year_week_mondays(year)
+    return f"v{LAYOUT_VERSION}:{year}:{slot_count}:{len(weeks)}"
+
+
+def _year_week_mondays(year: int) -> list:
+    """Every week-Monday whose Mon–Fri overlaps the calendar year, in order.
+    Fixed for a given year, so the week/day page count is constant."""
+    first_mon = _week_monday(date(year, 1, 1))
+    last_mon  = _week_monday(date(year, 12, 31))
+    out, w = [], first_mon
+    while w <= last_mon:
+        out.append(w)
+        w += timedelta(days=7)
+    return out
+
+
+def draw_blank_meeting_page(c: canvas.Canvas, year: int, slot: int):
+    """An unassigned meeting-note slot: same A4 geometry as a real meeting page
+    so the document's page size/order stays constant, ready to host a future
+    meeting (and its handwriting) once that slot is claimed."""
+    active = {m for m in range(1, 13)
+              if f"month_{year}_{m:02d}" in _NAV_VALID_BMS}
+    _draw_year_edge_tabs(c, year, active_months=active or None)
+
+    top = PAGE_H - MARGIN
+    _draw_pill(c, MARGIN, top - 9, "MEETING NOTES", C_SILVER)
+    draw_nav_buttons(c, "", omit=())
+
+    ty = top - 34
+    txt(c, MARGIN, ty, "Open note page", size=13, bold=True, col=C_SILVER)
+    txt(c, MARGIN, ty - 6.5 * mm,
+        "Reserved space — links here once a meeting is scheduled.",
+        size=8, col=C_SILVER)
+
+    y = ty - 11 * mm
+    hrule(c, MARGIN, y, CONTENT_W, col=C_SILVER, lw=0.8)
+    y -= 6 * mm
+
+    AI_ROWS   = 5
+    ai_line_h = 7.2 * mm
+    ai_label_y = MARGIN + AI_ROWS * ai_line_h + 2 * mm
+
+    _caps_left(c, "NOTES", MARGIN, y)
+    y -= 9 * mm
+    while y > ai_label_y + 6 * mm:
+        hrule(c, MARGIN, y, CONTENT_W, col=C_GHOST, lw=0.5)
+        y -= 9 * mm
+
+    _caps_left(c, "ACTION ITEMS", MARGIN, ai_label_y)
+    ar = 2.4 * mm
+    ay = ai_label_y - 6 * mm
+    for _ in range(AI_ROWS):
+        circle(c, MARGIN + ar, ay, ar, fill=C_WHITE, stroke=C_SILVER, lw=0.6)
+        hrule(c, MARGIN + 2 * ar + 2 * mm, ay - ar,
+              CONTENT_W - (2 * ar + 2 * mm), col=C_GHOST, lw=0.5)
+        ay -= ai_line_h
+
+
+def build_yearly_planner(*args, **kwargs):
+    """Thread-safe wrapper around the fixed-geometry yearly builder."""
+    with _BUILD_LOCK:
+        return _build_yearly_impl(*args, **kwargs)
+
+
+def _build_yearly_impl(
+    events: list,
+    output_path: str,
+    year: int,
+    slot_map: dict,
+    slot_count: int,
+    timezone_name: str = "UTC",
+    self_email: str = None,
+    title: str = None,
+):
+    """
+    Build the fixed-geometry yearly planner (see module section header).
+
+    `slot_map` is {event_id: slot} from database.assign_meeting_slots — it must
+    already cover every timed event that should get a dedicated note page.
+    `slot_count` is the fixed size of the meeting-page pool and must stay
+    constant for the document's life (see yearly_geometry_signature).
+    """
+    from collections import defaultdict
+
+    try:   tz = ZoneInfo(timezone_name)
+    except Exception: tz = ZoneInfo("UTC")
+
+    weeks    = _year_week_mondays(year)
+    week_set = set(weeks)
+    months   = [(year, m) for m in range(1, 13)]
+
+    # day_week_map / day_day_map over the year's Mon–Fri days
+    day_week_map: dict = {}
+    day_day_map:  dict = {}
+    for w in weeks:
+        wbm = f"week_{w.isoformat()}"
+        for i in range(5):
+            d  = w + timedelta(days=i)
+            dk = d.isoformat()
+            day_week_map[dk] = wbm
+            day_day_map[dk]  = f"day_{dk}"
+
+    # Timed events get dedicated meeting pages (parity with build_planner);
+    # only those that actually hold a slot are linkable.
+    timed = sorted([e for e in events if not e.is_all_day], key=lambda e: e.start)
+    event_pg = {e.id: slot_map[e.id] for e in timed if e.id in slot_map}
+
+    # Nav context: every page that exists in this document.
+    global _NAV_TODAY, _NAV_VALID_BMS
+    _NAV_TODAY = datetime.now(tz).date()
+    _NAV_VALID_BMS = {YEAR_BM, MEETINGS_BM}
+    _NAV_VALID_BMS |= {f"month_{year}_{m:02d}" for m in range(1, 13)}
+    _NAV_VALID_BMS |= {f"week_{w.isoformat()}" for w in weeks}
+    _NAV_VALID_BMS |= {f"day_{(w + timedelta(days=i)).isoformat()}"
+                       for w in weeks for i in range(5)}
+    _NAV_VALID_BMS |= {f"event_{eid}" for eid in event_pg}
+
+    # Events grouped by day (month/week/day pages filter the full list anyway)
+    ev_by_day: dict = {}
+    for e in events:
+        dk = e.start.astimezone(tz).strftime("%Y-%m-%d")
+        ev_by_day.setdefault(dk, []).append(e)
+
+    # Group the year's weeks under the month they first touch within the year.
+    active_month_set = set(months)
+
+    def _week_month_key(w):
+        for i in range(7):
+            d = w + timedelta(days=i)
+            if (d.year, d.month) in active_month_set:
+                return (d.year, d.month)
+        return (year, w.month)
+
+    weeks_by_month: dict = defaultdict(list)
+    for w in weeks:
+        weeks_by_month[_week_month_key(w)].append(w)
+
+    months_by_year = {year: set(range(1, 13))}
+    active_months_int = set(range(1, 13))
+
+    # ── Draw ──────────────────────────────────────────────────────────────────
+    c = canvas.Canvas(output_path, pagesize=A4)
+    c.setTitle(title or f"PolarisFolio {year}")
+    c.setAuthor("PolarisFolio")
+
+    # Year overview
+    c.bookmarkPage(YEAR_BM)
+    c.addOutlineEntry(str(year), YEAR_BM, level=0)
+    draw_year_page(c, year, day_week_map, active_months=active_months_int, tz=tz)
+    c.showPage()
+
+    for (yr, month) in months:
+        month_bm = f"month_{yr}_{month:02d}"
+        c.bookmarkPage(month_bm)
+        c.addOutlineEntry(datetime(yr, month, 1).strftime("%B %Y"), month_bm, level=0)
+        draw_month_page(c, yr, month, events, day_week_map, tz=tz,
+                        active_months=months_by_year[yr], event_page_map=event_pg)
+        c.showPage()
+
+        for w in weeks_by_month.get((yr, month), []):
+            week_bm = f"week_{w.isoformat()}"
+            c.bookmarkPage(week_bm)
+            fri = w + timedelta(days=4)
+            c.addOutlineEntry(
+                f"Week {_sunday_week_of_year(w)} · {_fmt(w, '%-d %b')} – {_fmt(fri, '%-d %b')}",
+                week_bm, level=1)
+            wk_evts = {
+                (w + timedelta(days=i)).strftime("%Y-%m-%d"):
+                ev_by_day.get((w + timedelta(days=i)).strftime("%Y-%m-%d"), [])
+                for i in range(5)
+            }
+            prev_w = w - timedelta(days=7)
+            next_w = w + timedelta(days=7)
+            prev_week_bm = f"week_{prev_w.isoformat()}" if prev_w in week_set else ""
+            next_week_bm = f"week_{next_w.isoformat()}" if next_w in week_set else ""
+            prev_days = [prev_w + timedelta(days=i) for i in range(5)]
+            prev_evts = {d.strftime("%Y-%m-%d"):
+                         ev_by_day.get(d.strftime("%Y-%m-%d"), []) for d in prev_days}
+            prev_stats = _week_meeting_stats(prev_days, prev_evts, tz)
+            draw_week_page(c, w, wk_evts, event_pg, tz, month_bookmark=month_bm,
+                           prev_week_bm=prev_week_bm, next_week_bm=next_week_bm,
+                           prev_stats=prev_stats)
+            c.showPage()
+
+            for i in range(5):
+                day_d = w + timedelta(days=i)
+                d_bm  = f"day_{day_d.isoformat()}"
+                c.bookmarkPage(d_bm)
+                c.addOutlineEntry(f"  {_fmt(day_d, '%a %-d %b')}", d_bm, level=2)
+                day_ev = ev_by_day.get(day_d.strftime("%Y-%m-%d"), [])
+                if i > 0:
+                    prev_day_bm = f"day_{(day_d - timedelta(days=1)).isoformat()}"
+                else:
+                    pw = w - timedelta(days=7)
+                    prev_day_bm = (f"day_{(pw + timedelta(days=4)).isoformat()}"
+                                   if pw in week_set else "")
+                if i < 4:
+                    next_day_bm = f"day_{(day_d + timedelta(days=1)).isoformat()}"
+                else:
+                    nw = w + timedelta(days=7)
+                    next_day_bm = f"day_{nw.isoformat()}" if nw in week_set else ""
+                draw_day_page(c, day_d, day_ev, event_pg, tz,
+                              week_bookmark=week_bm, month_bookmark=month_bm,
+                              prev_day_bm=prev_day_bm, next_day_bm=next_day_bm)
+                c.showPage()
+
+    # ── Fixed meeting-page pool (permanent slots) ──────────────────────────────
+    slot_to_event = {event_pg[e.id]: e for e in timed if e.id in event_pg}
+    for slot in range(slot_count):
+        e = slot_to_event.get(slot)
+        if e is not None:
+            wmon = _week_monday(e.start.astimezone(tz).date())
+            wk_bm = f"week_{wmon.isoformat()}" if wmon in week_set else ""
+            day_bm = day_day_map.get(e.start.astimezone(tz).strftime("%Y-%m-%d"), "")
+            c.bookmarkPage(f"event_{e.id}")
+            c.addOutlineEntry(f"    {e.title[:40]}", f"event_{e.id}", level=3)
+            draw_meeting_page(c, e, wk_bm, tz=tz, day_bookmark=day_bm,
+                              self_email=self_email)
+        else:
+            c.bookmarkPage(f"slotblank_{year}_{slot}")
+            draw_blank_meeting_page(c, year, slot)
+        c.showPage()
+
+    # Meetings agenda (last page)
+    c.bookmarkPage(MEETINGS_BM)
+    c.addOutlineEntry("Meetings", MEETINGS_BM, level=0)
+    draw_meetings_page(c, year, events, event_pg,
+                       active_months=active_months_int, tz=tz)
+    c.showPage()
+
+    c.save()
+    print(f"Yearly PDF saved: {output_path} ({slot_count} meeting slots)")
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Quick self-test
 # ─────────────────────────────────────────────────────────────────────────────
 

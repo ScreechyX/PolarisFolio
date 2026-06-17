@@ -183,6 +183,38 @@
           </select>
         </div>
       </div>
+
+      <div class="grid-2" style="gap: 12px;">
+        <div class="form-group">
+          <label>Sync mode</label>
+          {% set smode = settings.get('sync_mode', 'rolling') %}
+          <select name="sync_mode" id="syncMode" onchange="toggleSyncMode()">
+            <option value="rolling" {% if smode == 'rolling' %}selected{% endif %}>Rolling planner (preserve handwriting)</option>
+            <option value="dated" {% if smode == 'dated' %}selected{% endif %}>New dated document each run</option>
+          </select>
+          <small style="color: var(--ink-3);">
+            Rolling: one fixed yearly planner updated in place — your handwriting stays. Dated: a fresh doc per run.
+          </small>
+        </div>
+
+        <div class="form-group" id="slotsGroup">
+          <label>Meeting note pages (rolling)</label>
+          <input type="number" name="sync_meeting_slots" min="0" max="1000"
+            value="{{ settings.get('sync_meeting_slots', '200') }}">
+          <small style="color: var(--ink-3);">
+            Permanent per-meeting note pages reserved for the year. Fixed for the document's life — changing it rebuilds the planner (clears existing ink).
+          </small>
+        </div>
+
+        <div class="form-group" id="keepDaysGroup">
+          <label>Keep last N dated docs (dated)</label>
+          <input type="number" name="schedule_keep_days" min="0"
+            value="{{ settings.get('schedule_keep_days', '5') }}">
+          <small style="color: var(--ink-3);">
+            Older auto-generated dated planners beyond this many are pruned from the device.
+          </small>
+        </div>
+      </div>
     </div>
 
     <div style="display: flex; gap: 10px; align-items: center;">
@@ -199,6 +231,15 @@
   </form>
 
 <script>
+  function toggleSyncMode() {
+    const mode = document.getElementById('syncMode').value;
+    const slots = document.getElementById('slotsGroup');
+    const keep = document.getElementById('keepDaysGroup');
+    if (slots) slots.style.display = (mode === 'rolling') ? '' : 'none';
+    if (keep) keep.style.display = (mode === 'dated') ? '' : 'none';
+  }
+  toggleSyncMode();
+
   async function runScheduleNow() {
     const btn = document.getElementById('runNowBtn');
     const status = document.getElementById('runNowStatus');
