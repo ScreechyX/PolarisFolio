@@ -175,39 +175,53 @@ async def _run_rolling_sync(manager, tz, tz_name, rm_folder, upload):
     import asyncio
     from datetime import datetime
     from database import (get_setting, set_setting, assign_meeting_slots,
-                          add_upload)
-    from pdf_generator import build_yearly_planner, yearly_geometry_signature
+                          clear_meeting_slots, add_upload)
+    from pdf_generator import (build_yearly_planner, yearly_geometry_signature,
+                               event_qualifies_for_slot)
     from rm_uploader import RemarkableUploader
 
-    year       = datetime.now(tz).year
-    slot_count = int(await get_setting("sync_meeting_slots", "200"))
-    doc_name   = (await get_setting("rm_doc_name", "")).strip() or f"PolarisFolio {year}"
+    year        = datetime.now(tz).year
+    slot_count  = int(await get_setting("sync_meeting_slots", "200"))
+    slot_filter = await get_setting("slot_filter", "attendees")
+    doc_name    = (await get_setting("rm_doc_name", "")).strip() or f"PolarisFolio {year}"
+    self_email  = (await get_setting("ms_user_email", "")).strip() or None
+
+    # Decide in-place vs recreate up front (geometry depends only on year +
+    # slot count). A recreate resets ink, so it's also the moment to re-slot
+    # cleanly — wipe stale assignments so a changed filter/count starts fresh.
+    sig          = yearly_geometry_signature(year, slot_count)
+    live_sig     = await get_setting("sync_live_sig", "")
+    content_only = (live_sig == sig)
+    if not content_only and live_sig:
+        await clear_meeting_slots(year)
 
     # Pull the full year so the fixed planner reflects the current calendar.
     year_start = datetime(year, 1, 1, 0, 0, 0, tzinfo=tz)
     year_end   = datetime(year, 12, 31, 23, 59, 59, tzinfo=tz)
     events = await asyncio.to_thread(manager.get_events, year_start, year_end)
 
-    # Stable per-meeting slot assignment (sorted so first-time slots are
-    # deterministic; existing slots are never moved).
-    timed = sorted([e for e in events if not e.is_all_day], key=lambda e: e.start)
-    slot_map = await assign_meeting_slots(year, timed, slot_count)
+    # Only meetings matching the slot filter get a permanent note page. Sorted
+    # so first-time slot assignment is deterministic; existing slots never move.
+    timed = [e for e in events if not e.is_all_day]
+    qualifying = sorted(
+        [e for e in timed if event_qualifies_for_slot(e, slot_filter, self_email)],
+        key=lambda e: e.start)
+    print(f"  Slot filter '{slot_filter}': {len(qualifying)} of {len(timed)} "
+          f"timed events qualify for a note page")
+    if slot_filter == "attendees" and timed and not qualifying:
+        print("  WARNING: no events have attendees — your feed may not include "
+              "ATTENDEE data. Set slot filter to 'all' in Settings if so.")
+    slot_map = await assign_meeting_slots(year, qualifying, slot_count)
 
     PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")
     os.makedirs(PDF_DIR, exist_ok=True)
     pdf_path = os.path.join(PDF_DIR, f"polarisfolio_{year}_rolling.pdf")
-
-    self_email = (await get_setting("ms_user_email", "")).strip() or None
 
     await asyncio.to_thread(
         build_yearly_planner,
         events=events, output_path=pdf_path, year=year,
         slot_map=slot_map, slot_count=slot_count,
         timezone_name=tz_name, self_email=self_email, title=doc_name)
-
-    sig          = yearly_geometry_signature(year, slot_count)
-    live_sig     = await get_setting("sync_live_sig", "")
-    content_only = (live_sig == sig)
 
     uploaded = False
     # Records what actually happened to the device doc, surfaced in History.

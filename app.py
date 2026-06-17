@@ -635,6 +635,7 @@ async def save_settings(
     schedule_upload: str = Form("0"),
     sync_mode: str = Form("rolling"),
     sync_meeting_slots: str = Form("200"),
+    slot_filter: str = Form("attendees"),
     schedule_keep_days: str = Form("5"),
 ):
     if ms_client_id:
@@ -658,6 +659,7 @@ async def save_settings(
     except (TypeError, ValueError):
         slots = 200
     await set_setting("sync_meeting_slots", str(slots))
+    await set_setting("slot_filter", slot_filter if slot_filter in ("attendees", "all") else "attendees")
     try:
         keep = max(0, int(schedule_keep_days))
     except (TypeError, ValueError):
