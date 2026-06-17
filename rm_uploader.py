@@ -8,6 +8,7 @@ authenticate with your reMarkable account.
 
 import os
 import shutil
+import tempfile
 import subprocess
 
 
@@ -20,7 +21,19 @@ class RemarkableUploader:
     def __init__(self, settings: dict = None):
         self.folder = (settings or {}).get("rm_folder", "/PolarisFolio").strip()
 
-    def upload(self, display_name: str, pdf_path: str, folder: str = None) -> bool:
+    def upload(self, display_name: str, pdf_path: str, folder: str = None,
+               force: bool = True) -> bool:
+        """
+        Upload pdf_path to the reMarkable.
+
+        rmapi names the document after the uploaded file's basename, so we stage
+        a copy named exactly `display_name` to control how it appears on device.
+
+        `force=True` overwrites a same-named document (used for the manual
+        "working" planner). `force=False` never overwrites an existing document
+        — used by the daily scheduler so each dated planner is its own doc and
+        prior days' handwritten notes are left untouched.
+        """
         if not _rmapi_available():
             print("  rmapi not found on PATH.")
             return False
@@ -43,20 +56,35 @@ class RemarkableUploader:
         except Exception:
             pass
 
-        try:
-            result = subprocess.run(
-                ["rmapi", "put", "--force", pdf_path, target_folder],
-                capture_output=True, text=True, timeout=120, env=env,
-            )
-            if result.returncode == 0:
-                print(f"  rmapi: uploaded '{display_name}' to {target_folder}")
-                return True
-            else:
-                print(f"  rmapi error: {result.stderr.strip() or result.stdout.strip()}")
+        safe_name = (display_name or "PolarisFolio").replace("/", "-").strip()
+        with tempfile.TemporaryDirectory() as td:
+            staged = os.path.join(td, f"{safe_name}.pdf")
+            try:
+                shutil.copy2(pdf_path, staged)
+            except Exception as e:
+                print(f"  staging error: {e}")
                 return False
-        except subprocess.TimeoutExpired:
-            print("  rmapi: upload timed out")
-            return False
-        except Exception as e:
-            print(f"  rmapi: unexpected error - {e}")
-            return False
+
+            cmd = ["rmapi", "put"]
+            if force:
+                cmd.append("--force")
+            cmd += [staged, target_folder]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True,
+                                        timeout=120, env=env)
+                if result.returncode == 0:
+                    print(f"  rmapi: uploaded '{safe_name}' to {target_folder}")
+                    return True
+                err = result.stderr.strip() or result.stdout.strip()
+                # Without --force, an existing same-day doc is expected — not fatal
+                if not force and "exist" in err.lower():
+                    print(f"  rmapi: '{safe_name}' already on device, skipping (notes preserved)")
+                    return True
+                print(f"  rmapi error: {err}")
+                return False
+            except subprocess.TimeoutExpired:
+                print("  rmapi: upload timed out")
+                return False
+            except Exception as e:
+                print(f"  rmapi: unexpected error - {e}")
+                return False

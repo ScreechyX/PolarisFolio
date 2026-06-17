@@ -98,7 +98,9 @@ async def _scheduled_generate():
 
     PDF_DIR = os.path.expanduser("~/polarisfolio_pdfs")
     os.makedirs(PDF_DIR, exist_ok=True)
-    display_name = f"PolarisFolio {start.strftime('%b %Y')} (auto)"
+    # Dated name → one document per day on the reMarkable, so previous days'
+    # handwritten notes are never overwritten.
+    display_name = f"PolarisFolio {start.isoformat()}"
     filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}_auto.pdf"
     pdf_path = os.path.join(PDF_DIR, filename)
 
@@ -118,8 +120,9 @@ async def _scheduled_generate():
     if upload and os.path.exists(pdf_path):
         try:
             uploader = RemarkableUploader()
+            # force=False: never overwrite an existing dated doc (protect notes)
             uploaded = await asyncio.to_thread(
-                uploader.upload, display_name, pdf_path, folder=rm_folder)
+                uploader.upload, display_name, pdf_path, folder=rm_folder, force=False)
         except Exception as e:
             print(f"Scheduler: upload error - {e}")
 
