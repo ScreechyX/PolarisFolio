@@ -153,6 +153,7 @@ async def _scheduled_generate():
         event_count=len(events),
         pdf_path=pdf_path,
         uploaded_to_rm=uploaded,
+        sync_action="dated" if uploaded else None,
     )
     print(f"Scheduler: generated {display_name} ({len(events)} events)")
 
@@ -209,16 +210,23 @@ async def _run_rolling_sync(manager, tz, tz_name, rm_folder, upload):
     content_only = (live_sig == sig)
 
     uploaded = False
+    # Records what actually happened to the device doc, surfaced in History.
+    sync_action = "generated"
     if upload and os.path.exists(pdf_path):
         try:
             uploader = RemarkableUploader()
             uploaded = await asyncio.to_thread(
                 uploader.update_in_place, doc_name, pdf_path, rm_folder, content_only)
             if uploaded:
-                # Record the geometry now live on the device.
+                # An unchanged geometry is swapped in place (ink preserved);
+                # a changed one is recreated. Note the live signature now set.
+                sync_action = "in_place" if content_only else "recreated"
                 await set_setting("sync_live_sig", sig)
+            else:
+                sync_action = "upload_failed"
         except Exception as e:
             print(f"Scheduler: rolling sync error - {e}")
+            sync_action = "upload_failed"
 
     await add_upload(
         display_name=doc_name,
@@ -227,6 +235,7 @@ async def _run_rolling_sync(manager, tz, tz_name, rm_folder, upload):
         event_count=len(events),
         pdf_path=pdf_path,
         uploaded_to_rm=uploaded,
+        sync_action=sync_action,
     )
     print(f"Scheduler: rolling sync {doc_name} ({len(events)} events, "
           f"{'updated in place' if content_only else 'recreated'})")

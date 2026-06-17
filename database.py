@@ -42,6 +42,7 @@ async def init_db():
                 event_count  INTEGER DEFAULT 0,
                 pdf_path     TEXT,
                 uploaded_to_rm INTEGER DEFAULT 0,
+                sync_action  TEXT,
                 created_at   TEXT DEFAULT (datetime('now'))
             );
 
@@ -56,6 +57,11 @@ async def init_db():
             CREATE UNIQUE INDEX IF NOT EXISTS idx_meeting_slots_year_slot
                 ON meeting_slots (year, slot);
         """)
+        # Migration: add sync_action to uploads tables created before it existed.
+        try:
+            await db.execute("ALTER TABLE uploads ADD COLUMN sync_action TEXT")
+        except Exception:
+            pass  # column already present
         await db.commit()
 
 
@@ -134,13 +140,16 @@ async def add_upload(
     event_count: int,
     pdf_path: str,
     uploaded_to_rm: bool = False,
+    sync_action: str = None,
 ) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             """INSERT INTO uploads
-               (display_name, start_date, end_date, event_count, pdf_path, uploaded_to_rm)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (display_name, start_date, end_date, event_count, pdf_path, 1 if uploaded_to_rm else 0)
+               (display_name, start_date, end_date, event_count, pdf_path,
+                uploaded_to_rm, sync_action)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (display_name, start_date, end_date, event_count, pdf_path,
+             1 if uploaded_to_rm else 0, sync_action)
         )
         await db.commit()
         return cur.lastrowid
