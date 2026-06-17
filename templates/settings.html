@@ -215,6 +215,44 @@
           </small>
         </div>
       </div>
+
+      {% if rolling %}
+      <div id="rollingStatus" style="margin-top: 6px; padding: 14px 16px; border: 1px solid var(--border, #E5E5E5); border-radius: 8px; background: var(--card-2, #FAFAFA);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <div style="font-weight: 600; color: var(--ink);">Live planner — {{ rolling.doc_name }}</div>
+          {% if rolling.live %}
+            {% if rolling.next_in_place %}
+            <span class="badge badge-green" title="Next run swaps the PDF in place; handwriting is preserved">next run: in place</span>
+            {% else %}
+            <span class="badge badge-orange" title="Geometry changed — next run recreates the document and resets handwriting">next run: recreate</span>
+            {% endif %}
+          {% else %}
+            <span class="badge badge-grey" title="No live document yet — the first run creates it">not yet synced</span>
+          {% endif %}
+        </div>
+
+        <div style="margin-bottom: 4px; font-size: 12.5px; color: var(--ink-2);">
+          Meeting slots used: <strong>{{ rolling.slots_used }} / {{ rolling.slot_count }}</strong>
+          ({{ rolling.slots_pct }}%)
+        </div>
+        <div style="height: 7px; border-radius: 4px; background: #ECECEC; overflow: hidden;">
+          <div style="height: 100%; width: {{ rolling.slots_pct if rolling.slots_pct <= 100 else 100 }}%;
+                      background: {% if rolling.slots_pct >= 90 %}#E65100{% elif rolling.slots_pct >= 70 %}#F9A825{% else %}var(--accent, #2E7D32){% endif %};"></div>
+        </div>
+
+        {% if rolling.slots_used >= rolling.slot_count %}
+        <div style="margin-top: 8px; font-size: 12px; color: #C62828;">
+          All slots claimed for {{ rolling.year }} — further new meetings appear on day/week pages but get no dedicated note page. Increase "Meeting note pages" to add capacity (rebuilds once).
+        </div>
+        {% endif %}
+
+        <small style="display: block; margin-top: 10px; color: var(--ink-3);">
+          Handwriting is preserved while the page geometry is unchanged. The next run instead
+          <strong>recreates</strong> the document (resetting ink) if you change the slot count, on a
+          layout update, or when the year rolls over to {{ rolling.year + 1 }}.
+        </small>
+      </div>
+      {% endif %}
     </div>
 
     <div style="display: flex; gap: 10px; align-items: center;">
@@ -235,8 +273,10 @@
     const mode = document.getElementById('syncMode').value;
     const slots = document.getElementById('slotsGroup');
     const keep = document.getElementById('keepDaysGroup');
+    const status = document.getElementById('rollingStatus');
     if (slots) slots.style.display = (mode === 'rolling') ? '' : 'none';
     if (keep) keep.style.display = (mode === 'dated') ? '' : 'none';
+    if (status) status.style.display = (mode === 'rolling') ? '' : 'none';
   }
   toggleSyncMode();
 

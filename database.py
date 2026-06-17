@@ -201,6 +201,16 @@ async def get_meeting_slots(year: int) -> dict:
             return {r[0]: r[1] for r in rows}
 
 
+async def count_meeting_slots(year: int) -> int:
+    """How many page slots are claimed for `year` (reserved, never reused)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM meeting_slots WHERE year = ?", (year,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+
 async def assign_meeting_slots(year: int, events: list, pool_size: int) -> dict:
     """
     Ensure every event has a stable page slot for `year`, returning the full

@@ -577,10 +577,41 @@ async def settings_page(request: Request, success: str = None, error: str = None
     settings = await get_all_settings()
     ms_ok = await ms_connected()
 
+    # Rolling-sync status: live document, slot usage, and whether the next run
+    # will update in place or recreate (which resets handwriting).
+    rolling = None
+    if settings.get("sync_mode", "rolling") == "rolling":
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from database import count_meeting_slots
+        from pdf_generator import yearly_geometry_signature
+        try:
+            tz = ZoneInfo(settings.get("timezone") or "UTC")
+        except Exception:
+            tz = ZoneInfo("UTC")
+        year = datetime.now(tz).year
+        try:
+            slot_count = int(settings.get("sync_meeting_slots", "200"))
+        except (TypeError, ValueError):
+            slot_count = 200
+        used = await count_meeting_slots(year)
+        sig = yearly_geometry_signature(year, slot_count)
+        live_sig = settings.get("sync_live_sig", "")
+        rolling = {
+            "doc_name": (settings.get("rm_doc_name") or f"PolarisFolio {year}").strip(),
+            "year": year,
+            "slot_count": slot_count,
+            "slots_used": used,
+            "slots_pct": round(100 * used / slot_count) if slot_count else 0,
+            "next_in_place": bool(live_sig) and live_sig == sig,
+            "live": bool(live_sig),
+        }
+
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings,
         "ms_connected": ms_ok,
         "rmapi_ok": shutil.which("rmapi") is not None,
+        "rolling": rolling,
         "success": success,
         "error": error,
         "active": "settings",
