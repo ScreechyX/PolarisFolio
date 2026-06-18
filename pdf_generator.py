@@ -2137,7 +2137,7 @@ def _build_planner_impl(
 # LAYOUT_VERSION bumps whenever the page set changes shape; the scheduler folds
 # it into the geometry signature so a layout change triggers a fresh document
 # rather than a misaligned in-place swap.
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2  # bumped: redesign (year overview, tab palette, week numbering) reshaped pages — force one recreate
 
 
 def event_qualifies_for_slot(event, mode: str = "attendees",
