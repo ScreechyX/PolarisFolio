@@ -19,7 +19,7 @@ cd "$(dirname "$0")"
 
 BRANCH="${POLARISFOLIO_BRANCH:-${GITHUB_DEPLOY_BRANCH:-main}}"
 SERVICE="${POLARISFOLIO_SERVICE:-polarisfolio}"
-LOG="${POLARISFOLIO_UPDATE_LOG:-$HOME/.polarisfolio_update.log}"
+LOG="${POLARISFOLIO_UPDATE_LOG:-${HOME:-/root}/.polarisfolio_update.log}"
 
 {
   echo "=== $(date -Is) deploy check (branch: $BRANCH) ==="

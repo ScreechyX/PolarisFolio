@@ -8,5 +8,8 @@ Type=oneshot
 # Run as root: the container's sudo is unavailable, so update.sh restarts the
 # service directly when root (and chowns the tree back to the app user). Adjust
 # the path if the app lives elsewhere (deploy.sh installs under the app user).
+# systemd starts root oneshots with no $HOME; set it so update.sh's strict mode
+# (set -u) and git's global config (safe.directory) both work.
+Environment=HOME=/root
 WorkingDirectory=/home/polarisfolio/polarisfolio_web
 ExecStart=/home/polarisfolio/polarisfolio_web/update.sh
