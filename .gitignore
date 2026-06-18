@@ -62,3 +62,11 @@ node_modules/
 
 # Outlook / mailbox exports (never commit — large + sensitive)
 *.pst
+
+# Unrelated local-only projects/scripts that share this folder — not part of
+# PolarisFolio and must not land in this (public) repo.
+adonis_refresh.py
+start-adonis-server.bat
+hello-world/
+lifecycle-manager/
+reMarkableSync/
