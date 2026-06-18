@@ -5,7 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Match the User/WorkingDirectory of polarisfolio.service
-User=ubuntu
-WorkingDirectory=/home/ubuntu/polarisfolio_web
-ExecStart=/home/ubuntu/polarisfolio_web/update.sh
+# Run as root: the container's sudo is unavailable, so update.sh restarts the
+# service directly when root (and chowns the tree back to the app user). Adjust
+# the path if the app lives elsewhere (deploy.sh installs under the app user).
+WorkingDirectory=/home/polarisfolio/polarisfolio_web
+ExecStart=/home/polarisfolio/polarisfolio_web/update.sh

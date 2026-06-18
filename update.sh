@@ -51,5 +51,15 @@ LOG="${POLARISFOLIO_UPDATE_LOG:-$HOME/.polarisfolio_update.log}"
   # Log completion before the restart: restarting the service tears down this
   # script's process group, so anything logged after it would be lost.
   echo "deploy complete ($before -> $after) — restarting $SERVICE"
-  sudo systemctl restart "$SERVICE"
+  if [ "$(id -u)" -eq 0 ]; then
+    # Running as root (systemd timer) — restart directly. sudo may be broken or
+    # absent in the container, and a root pull leaves files root-owned, so hand
+    # the tree back to whoever owns it before bouncing the service.
+    owner="$(stat -c '%U' . 2>/dev/null || echo root)"
+    [ "$owner" != root ] && chown -R "$owner:$owner" . 2>/dev/null || true
+    systemctl restart "$SERVICE"
+  else
+    # Running as the app user (e.g. webhook) — needs passwordless sudo for restart.
+    sudo systemctl restart "$SERVICE"
+  fi
 } >> "$LOG" 2>&1

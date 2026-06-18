@@ -1,11 +1,13 @@
 [Unit]
-Description=PolarisFolio daily auto-update safety net
+Description=PolarisFolio auto-update poller (git pull + restart if changed)
 
 [Timer]
-# Daily fallback in case a webhook push was missed (e.g. container was down).
-OnCalendar=*-*-* 04:30:00
+# Poll GitHub every 10 minutes. update.sh is a no-op when nothing changed, so
+# this is the primary deploy mechanism here (the webhook is blocked by
+# Cloudflare Access). First run shortly after boot, then every 10 min.
+OnBootSec=2min
+OnUnitActiveSec=10min
 Persistent=true
-RandomizedDelaySec=300
 
 [Install]
 WantedBy=timers.target
