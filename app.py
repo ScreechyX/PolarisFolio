@@ -375,10 +375,11 @@ async def github_webhook(request: Request):
 
 
 @app.get("/history", response_class=HTMLResponse)
-async def history_page(request: Request):
+async def history_page(request: Request, success: str = None):
     uploads = await get_uploads(limit=50)
     return templates.TemplateResponse(request, "history.html", {
         "uploads": uploads,
+        "success": success,
         "active": "history",
     })
 
