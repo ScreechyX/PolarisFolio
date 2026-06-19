@@ -40,7 +40,11 @@ DAY_MAP = {
 
 
 async def _scheduled_generate():
-    """The job function — same logic as app._run_generation."""
+    """The job function — pulls calendars, builds the planner, and syncs.
+
+    Triggered by the daily schedule and by the Settings "Run now" button
+    (POST /api/schedule/run-now).
+    """
     from database import get_setting, get_ical_feeds
     from calendar_manager import CalendarManager
     from pdf_generator import build_planner

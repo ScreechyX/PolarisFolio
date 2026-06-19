@@ -9,13 +9,6 @@
 
 <div class="page-body">
 
-  {% if generating %}
-  <div class="alert alert-info">
-    <span class="spinner"></span>
-    Generating your planner now. This usually takes 10–20 seconds. Refresh to check progress.
-  </div>
-  {% endif %}
-
   {% if success == 'cleared' %}
   <div class="alert alert-success">History cleared.</div>
   {% endif %}
@@ -87,33 +80,13 @@
       <div class="empty-icon">📄</div>
       <div class="empty-title">No planners yet</div>
       <div class="empty-body">
-        <a href="/generate" style="color: var(--accent);">Generate your first planner</a>
-        to see it here.
+        Planners appear here after a scheduled sync, or use
+        <a href="/settings" style="color: var(--accent);">Run now in Settings</a>.
       </div>
     </div>
   </div>
   {% endif %}
 
 </div>
-
-{% if generating %}
-<script>
-  // Poll the server's in-flight flag; once generation finishes, reload to a
-  // clean URL so the banner clears and the new planner is shown.
-  async function pollForCompletion() {
-    try {
-      const res = await fetch('/api/generating');
-      const data = await res.json();
-      if (!data.active) {
-        window.location.href = '/history';
-        return;
-      }
-    } catch {}
-    setTimeout(pollForCompletion, 3000);
-  }
-
-  setTimeout(pollForCompletion, 3000);
-</script>
-{% endif %}
 
 {% endblock %}

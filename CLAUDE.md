@@ -21,7 +21,7 @@ Self-hosted reMarkable Paper Pro planner app. Pulls calendar events from Microso
 | `pdf_generator.py` | Monthly overview, daily, and meeting note pages with hyperlinks |
 | `rm_uploader.py` | Uploads PDF to reMarkable cloud (rmapi CLI primary, REST API fallback) |
 | `main.py` | CLI entry point |
-| `templates/` | base, dashboard, calendars, generate, history, settings |
+| `templates/` | base, dashboard, calendars, history, settings |
 | `deploy.sh` | Single-command Proxmox LXC container setup |
 | `polarisfolio.service` | systemd unit file |
 | `nginx.conf` | Reverse proxy config |
@@ -37,7 +37,7 @@ Open http://localhost:8000
 
 ## Key design decisions
 - Single-user app — no auth wall, no multi-tenancy
-- Background task pattern for PDF generation (FastAPI BackgroundTasks) — generate redirects immediately to /history
+- Planner generation runs via the scheduler (`scheduler._scheduled_generate`), triggered by the daily schedule or the Settings "Run now" button (`POST /api/schedule/run-now`). There is no ad-hoc generate page.
 - MSAL token cache stored in `~/.polarisfolio_msal_cache.json`
 - PDFs stored in `~/polarisfolio_pdfs/`
 - DB at `~/.polarisfolio_web.db` (override with `POLARISFOLIO_DB` env var)

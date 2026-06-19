@@ -10,8 +10,6 @@ Routes:
   POST /calendars/ical    - add ICS feed
   POST /calendars/ical/{id}/toggle - toggle feed on/off
   POST /calendars/ical/{id}/delete - remove feed
-  GET  /generate          - generate planner form
-  POST /generate          - run generation + upload
   GET  /history           - past planners
   GET  /download/{id}     - download a generated PDF
   GET  /settings          - app settings
@@ -38,7 +36,7 @@ import msal
 from database import (
     init_db, get_setting, set_setting, get_all_settings,
     get_ical_feeds, add_ical_feed, toggle_ical_feed, delete_ical_feed,
-    add_upload, get_uploads, clear_uploads, update_upload_rm_status,
+    get_uploads, clear_uploads,
 )
 from scheduler import scheduler, apply_schedule
 
@@ -322,169 +320,8 @@ async def delete_feed(feed_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Generate
-# ---------------------------------------------------------------------------
-
-@app.get("/generate", response_class=HTMLResponse)
-async def generate_page(request: Request, success: str = None, error: str = None):
-    ms_ok = await ms_connected()
-    feeds = await get_ical_feeds(enabled_only=True)
-    has_sources = ms_ok or len(feeds) > 0
-
-    from zoneinfo import ZoneInfo
-    try:
-        _tz = ZoneInfo(await get_setting("timezone", "UTC"))
-    except Exception:
-        _tz = ZoneInfo("UTC")
-    today = datetime.now(_tz).date()
-    default_end = today + timedelta(days=30)
-
-    return templates.TemplateResponse(request, "generate.html", {
-        "ms_connected": ms_ok,
-        "feeds": feeds,
-        "has_sources": has_sources,
-        "default_start": today.isoformat(),
-        "default_end": default_end.isoformat(),
-        "success": success,
-        "error": error,
-        "active": "generate",
-    })
-
-
-# Number of planner generations currently in flight. The history page polls
-# this so the "Generating…" banner clears reliably once the work is done.
-_active_generations = 0
-
-
-@app.post("/generate")
-async def run_generate(
-    background_tasks: BackgroundTasks,
-    start_date: str = Form(...),
-    end_date: str = Form(...),
-    upload_to_rm: str = Form("off"),
-    rm_folder: str = Form("/PolarisFolio"),
-):
-    try:
-        start = date.fromisoformat(start_date)
-        end = date.fromisoformat(end_date)
-    except ValueError:
-        return RedirectResponse("/generate?error=invalid_dates", status_code=303)
-
-    if end < start:
-        return RedirectResponse("/generate?error=end_before_start", status_code=303)
-
-    # Mark a generation in flight up-front (before the task starts) so the
-    # banner shows immediately and the poll can't miss it.
-    global _active_generations
-    _active_generations += 1
-
-    background_tasks.add_task(
-        _run_generation,
-        start, end,
-        upload_to_rm == "on",
-        rm_folder,
-    )
-
-    return RedirectResponse("/history?generating=1", status_code=303)
-
-
-async def _run_generation(start: date, end: date, upload: bool, rm_folder: str):
-    """Background task wrapper — always clears the in-flight counter."""
-    global _active_generations
-    try:
-        await _do_generation(start, end, upload, rm_folder)
-    except Exception as e:
-        print(f"Generation error: {e}")
-    finally:
-        _active_generations = max(0, _active_generations - 1)
-
-
-async def _do_generation(
-    start: date,
-    end: date,
-    upload: bool,
-    rm_folder: str,
-):
-    """Pull calendar, generate PDF, optionally upload."""
-    from calendar_manager import CalendarManager
-    from pdf_generator import build_planner
-    from rm_uploader import RemarkableUploader
-
-    manager = CalendarManager()
-
-    # Microsoft Graph
-    token = await get_ms_token()
-    if token:
-        manager.add_graph_source(token, name="Microsoft 365")
-
-    # ICS feeds
-    feeds = await get_ical_feeds(enabled_only=True)
-    for f in feeds:
-        manager.add_ical_source(url=f["url"], name=f["name"])
-
-    if not manager._sources:
-        return
-
-    tz_name = await get_setting("timezone", "UTC")
-    from zoneinfo import ZoneInfo
-    tz = ZoneInfo(tz_name)
-    start_dt = datetime(start.year, start.month, start.day, 0, 0, 0, tzinfo=tz)
-    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=tz)
-
-    # Calendar pull is blocking network I/O — run off the event loop so the
-    # /history poll keeps responding while we generate.
-    events = await asyncio.to_thread(manager.get_events, start_dt, end_dt)
-
-    # Generate PDF
-    display_name = f"PolarisFolio {start.strftime('%b %Y')}"
-    filename = f"polarisfolio_{start.isoformat()}_{end.isoformat()}.pdf"
-    pdf_path = os.path.join(PDF_DIR, filename)
-    self_email = await get_setting("ms_user_email", "")
-    # reportlab PDF generation is CPU-heavy and blocking — run it in a thread
-    # so it doesn't freeze the web server (and the progress poll) for everyone.
-    await asyncio.to_thread(
-        build_planner,
-        events=events,
-        output_path=pdf_path,
-        start_date=start,
-        end_date=end,
-        title=display_name,
-        timezone_name=tz_name,
-        self_email=self_email or None,
-    )
-
-    # Save to history immediately so the UI stops spinning
-    upload_id = await add_upload(
-        display_name=display_name,
-        start_date=start.isoformat(),
-        end_date=end.isoformat(),
-        event_count=len(events),
-        pdf_path=pdf_path,
-        uploaded_to_rm=False,
-    )
-
-    # Upload (may take a while — history entry already visible). Also blocking,
-    # so push it to a thread too.
-    if upload and os.path.exists(pdf_path):
-        try:
-            uploader = RemarkableUploader({"rm_folder": rm_folder})
-            uploaded = await asyncio.to_thread(
-                uploader.upload, display_name, pdf_path, folder=rm_folder)
-            if uploaded:
-                await update_upload_rm_status(upload_id, True)
-        except Exception as e:
-            print(f"Upload error: {e}")
-
-
-# ---------------------------------------------------------------------------
 # History
 # ---------------------------------------------------------------------------
-
-@app.get("/api/generating")
-async def api_generating():
-    """Whether any planner generation is currently in flight."""
-    return JSONResponse({"active": _active_generations > 0})
-
 
 @app.post("/webhook/github")
 async def github_webhook(request: Request):
@@ -538,13 +375,10 @@ async def github_webhook(request: Request):
 
 
 @app.get("/history", response_class=HTMLResponse)
-async def history_page(request: Request, generating: str = None):
+async def history_page(request: Request):
     uploads = await get_uploads(limit=50)
-    # Show the banner if asked to (?generating=1) or if work is actually running
-    show_generating = (generating == "1") or (_active_generations > 0)
     return templates.TemplateResponse(request, "history.html", {
         "uploads": uploads,
-        "generating": show_generating,
         "active": "history",
     })
 
@@ -683,7 +517,7 @@ async def schedule_run_now(background_tasks: BackgroundTasks):
 
 
 # ---------------------------------------------------------------------------
-# API - event preview (for generate page)
+# API - debug
 # ---------------------------------------------------------------------------
 
 @app.get("/api/debug/events")
@@ -730,38 +564,3 @@ async def debug_events(start: str, end: str):
 async def history_count():
     uploads = await get_uploads(limit=1)
     return JSONResponse({"count": len(uploads), "latest": uploads[0]["created_at"] if uploads else None})
-
-
-@app.get("/api/events/count")
-async def event_count(start: str, end: str):
-    """Returns event count for a date range - used by the generate form."""
-    try:
-        start_date = date.fromisoformat(start)
-        end_date = date.fromisoformat(end)
-    except ValueError:
-        return JSONResponse({"count": 0})
-
-    from calendar_manager import CalendarManager
-    manager = CalendarManager()
-
-    token = await get_ms_token()
-    if token:
-        manager.add_graph_source(token)
-
-    feeds = await get_ical_feeds(enabled_only=True)
-    for f in feeds:
-        manager.add_ical_source(url=f["url"], name=f["name"])
-
-    if not manager._sources:
-        return JSONResponse({"count": 0, "error": "no_sources"})
-
-    from zoneinfo import ZoneInfo
-    tz = ZoneInfo(await get_setting("timezone", "UTC"))
-    start_dt = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0, tzinfo=tz)
-    end_dt = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, tzinfo=tz)
-
-    try:
-        events = manager.get_events(start_dt, end_dt)
-        return JSONResponse({"count": len(events)})
-    except Exception as e:
-        return JSONResponse({"count": 0, "error": str(e)})
