@@ -24,6 +24,7 @@ a static PDF can't relabel itself, so it must be regenerated each morning.
 
 import asyncio
 from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -255,10 +256,12 @@ async def _run_rolling_sync(manager, tz, tz_name, rm_folder, upload):
           f"{'updated in place' if content_only else 'recreated'})")
 
 
-def _make_trigger(day: str, hour: int) -> CronTrigger:
-    # "daily" → every day; otherwise the given weekday
+def _make_trigger(day: str, hour: int, tz=None) -> CronTrigger:
+    # "daily" → every day; otherwise the given weekday.
+    # tz pins the hour to the user's timezone setting, not the host clock
+    # (the container runs UTC, so an unpinned hour fired 10h off in Brisbane).
     dow = "*" if day == "daily" else DAY_MAP.get(day, "mon")
-    return CronTrigger(day_of_week=dow, hour=hour, minute=0)
+    return CronTrigger(day_of_week=dow, hour=hour, minute=0, timezone=tz)
 
 
 async def apply_schedule():
@@ -270,16 +273,23 @@ async def apply_schedule():
     day = await get_setting("schedule_day", "mon")
     hour = int(await get_setting("schedule_hour", "7"))
 
+    # Fire the job in the user's timezone, not the host clock (UTC in prod).
+    tz_name = await get_setting("timezone", "UTC")
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz_name, tz = "UTC", ZoneInfo("UTC")
+
     scheduler.remove_all_jobs()
 
     if enabled == "1":
         scheduler.add_job(
             _scheduled_generate,
-            trigger=_make_trigger(day, hour),
+            trigger=_make_trigger(day, hour, tz),
             id="auto_generate",
             replace_existing=True,
             misfire_grace_time=3600,
         )
-        print(f"Scheduler: auto-generate enabled — {day} at {hour:02d}:00")
+        print(f"Scheduler: auto-generate enabled — {day} at {hour:02d}:00 {tz_name}")
     else:
         print("Scheduler: auto-generate disabled")
