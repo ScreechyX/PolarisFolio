@@ -168,6 +168,72 @@ class RemarkableUploader:
             print(f"  rmapi error: {err}")
             return False
 
+    def download(self, doc_name: str, dest_dir: str, folder: str = None) -> str:
+        """
+        Download a document from the reMarkable into `dest_dir` via `rmapi get`.
+
+        Authentication is the same rmapi token the rest of this class already
+        uses — rmapi's cloud-token auth (stored under ~/.config/rmapi after the
+        one-time `rmapi` login) covers `get` just as it covers `put`/`ls`/`rm`,
+        so there is no separate REST path to add for downloads.
+
+        `rmapi get` writes an archive named after the document — a `.rmdoc`
+        (a zip, on the ddvk sync-1.5 fork) or a plain `.zip` on older builds —
+        into the working directory. We run it inside `dest_dir` and return the
+        path to whatever archive it produced, or None on failure. The archive
+        is the raw document bundle (`.content`, `.metadata`, and the per-page
+        `.rm` handwriting files); see rm_notebook.latest_page_image to turn its
+        newest page into an image.
+        """
+        if not _rmapi_available():
+            print("  rmapi not found on PATH.")
+            return None
+
+        target_folder = (folder or self.folder or "/PolarisFolio").rstrip("/")
+        doc_path = f"{target_folder}/{doc_name}"
+        home = os.path.expanduser("~")
+        env = {**os.environ, "HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config")}
+
+        os.makedirs(dest_dir, exist_ok=True)
+        before = set(os.listdir(dest_dir))
+
+        print(f"\nDownloading '{doc_path}' via rmapi to {dest_dir}...")
+        try:
+            result = subprocess.run(["rmapi", "get", doc_path],
+                                    capture_output=True, text=True, timeout=120,
+                                    env=env, cwd=dest_dir)
+        except subprocess.TimeoutExpired:
+            print("  rmapi: download timed out")
+            return None
+        except Exception as e:
+            print(f"  rmapi: unexpected error - {e}")
+            return None
+
+        if result.returncode != 0:
+            err = result.stderr.strip() or result.stdout.strip()
+            print(f"  rmapi get error: {err}")
+            return None
+
+        # rmapi names the output after the document; find whatever it created.
+        new = [f for f in os.listdir(dest_dir) if f not in before]
+        archives = [f for f in new if f.lower().endswith((".rmdoc", ".zip"))]
+        if not archives:
+            # Fall back to any new entry (some builds drop a directory).
+            archives = new
+        if not archives:
+            print("  rmapi get produced no output file")
+            return None
+        # Prefer an exact name match, else the most recently modified new entry.
+        path = os.path.join(dest_dir, f"{doc_name}.rmdoc")
+        if not os.path.exists(path):
+            path = os.path.join(dest_dir, f"{doc_name}.zip")
+        if not os.path.exists(path):
+            archives.sort(key=lambda f: os.path.getmtime(os.path.join(dest_dir, f)),
+                          reverse=True)
+            path = os.path.join(dest_dir, archives[0])
+        print(f"  rmapi: downloaded to {os.path.basename(path)}")
+        return path
+
     def prune_old_dated(self, keep: int = 5, folder: str = None) -> int:
         """
         Delete old dated auto-planner docs, keeping only the `keep` most recent.

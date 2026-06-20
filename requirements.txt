@@ -10,3 +10,10 @@ python-dateutil
 msal
 reportlab
 apscheduler
+anthropic
+# "Ask Claude about a handwritten page" — render reMarkable .rm pages to images.
+# rmc provides the `rmc` CLI (.rm → SVG) and pulls in rmscene; cairosvg
+# rasterises SVG → PNG (needs the system libcairo library). If cairo is
+# unavailable, install svglib instead as a pure-Python fallback.
+rmc
+cairosvg
