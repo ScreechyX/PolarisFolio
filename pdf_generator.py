@@ -2447,23 +2447,73 @@ def _wrap_lines(c: canvas.Canvas, text: str, font: str, size: float,
     return out
 
 
-def build_answer_pdf(answer: str, output_path: str, task: str = "answer",
-                     transcription: str = None, title: str = "Claude",
-                     generated_at: datetime = None) -> str:
-    """
-    Render Claude's reply to a handwritten page as a hyperlink-free PDF, ready to
-    upload back to the device. Reuses the planner's drawing primitives
-    (draw_page_header, txt, hrule, _caps_left, _draw_pill) so it matches the
-    planner's look. Flows onto as many A4 pages as the answer needs.
-
-    `task` selects the header pill (see ANSWER_TASK_LABELS); `transcription`, if
-    given, is shown in a small "YOU WROTE" block above the answer so the page is
-    self-contained.
-    """
-    gen = generated_at or datetime.now(timezone.utc)
+def _draw_answer_entry(c: canvas.Canvas, entry: dict, title: str) -> None:
+    """Draw one answer (header + optional transcription + body), flowing onto
+    new pages as needed. The caller starts each entry on a fresh page."""
+    task = entry.get("task", "answer")
     task_label = ANSWER_TASK_LABELS.get(task, ANSWER_TASK_LABELS["answer"])
+    answer = (entry.get("answer") or "(no answer)")
+    transcription = entry.get("transcription") or ""
 
-    # The answer page has no hyperlinks, but draw_page_header is shared with the
+    gen = entry.get("created_at")
+    if isinstance(gen, str):
+        try:
+            gen = datetime.fromisoformat(gen)
+        except ValueError:
+            gen = None
+    sub = gen.strftime("%a %d %b %Y · %H:%M") if isinstance(gen, datetime) else ""
+
+    line_h = 5.6 * mm
+    bottom = MARGIN
+    state = {"y": 0.0}
+
+    def _page(continued: bool = False):
+        s = sub + ("  ·  cont." if continued else "")
+        sep_y = draw_page_header(c, title.upper(), left_sub="ASK CLAUDE",
+                                 right_label=s)
+        _draw_pill(c, MARGIN, sep_y - 6 * mm, task_label, C_ACCENT)
+        state["y"] = sep_y - 6 * mm - 8 * mm
+
+    def _ensure(space: float):
+        if state["y"] - space < bottom:
+            c.showPage()
+            _page(continued=True)
+
+    _page()
+
+    if transcription.strip():
+        _caps_left(c, "YOU WROTE", MARGIN, state["y"])
+        state["y"] -= 6.5 * mm
+        for line in _wrap_lines(c, transcription, "Helvetica-Oblique", 9, CONTENT_W):
+            _ensure(line_h)
+            if line:
+                txt(c, MARGIN, state["y"], line, size=9, italic=True, col=C_GREY)
+            state["y"] -= 5 * mm
+        state["y"] -= 2 * mm
+        _ensure(8 * mm)
+        hrule(c, MARGIN, state["y"], CONTENT_W, col=C_SILVER, lw=0.6)
+        state["y"] -= 8 * mm
+
+    _caps_left(c, task_label, MARGIN, state["y"])
+    state["y"] -= 7 * mm
+    for line in _wrap_lines(c, answer, "Helvetica", 10.5, CONTENT_W):
+        _ensure(line_h)
+        if line:
+            txt(c, MARGIN, state["y"], line, size=10.5, col=C_INK)
+        state["y"] -= line_h
+
+
+def build_answers_pdf(entries: list, output_path: str, title: str = "Claude") -> str:
+    """
+    Render a running log of Claude replies into a single PDF — one answer per
+    page (flowing onto continuation pages when long), newest first. Reuses the
+    planner's drawing primitives so it matches the planner's look.
+
+    `entries` is a list of dicts {created_at, task, transcription, answer};
+    `created_at` may be a datetime or ISO-8601 string.
+    """
+    entries = list(entries)
+    # The answer log has no hyperlinks, but draw_page_header is shared with the
     # planner; guard the nav globals so a concurrent planner build can't collide.
     with _BUILD_LOCK:
         global _NAV_VALID_BMS
@@ -2471,61 +2521,32 @@ def build_answer_pdf(answer: str, output_path: str, task: str = "answer",
         _NAV_VALID_BMS = set()
         try:
             c = canvas.Canvas(output_path, pagesize=A4)
-
-            def _start_page(continued: bool = False) -> float:
-                sub = gen.strftime("%a %d %b %Y · %H:%M UTC")
-                if continued:
-                    sub += "  ·  cont."
-                sep_y = draw_page_header(
-                    c, title.upper(), left_sub="ASK CLAUDE",
-                    right_label=sub)
-                # Task pill under the header rule
-                pill_cy = sep_y - 6 * mm
-                _draw_pill(c, MARGIN, pill_cy, task_label, C_ACCENT)
-                return pill_cy - 8 * mm
-
-            y = _start_page()
-            body_font = "Helvetica"
-            body_size = 10.5
-            line_h = 5.6 * mm
-            bottom = MARGIN
-
-            def _ensure(space: float):
-                nonlocal y
-                if y - space < bottom:
-                    c.showPage()
-                    y = _start_page(continued=True)
-
-            # ── Optional transcription of the handwriting ─────────────────────
-            if transcription and transcription.strip():
-                _caps_left(c, "YOU WROTE", MARGIN, y)
-                y -= 6.5 * mm
-                for line in _wrap_lines(c, transcription, "Helvetica-Oblique",
-                                        9, CONTENT_W):
-                    _ensure(line_h)
-                    if line:
-                        txt(c, MARGIN, y, line, size=9, italic=True, col=C_GREY)
-                    y -= 5 * mm
-                y -= 2 * mm
-                _ensure(8 * mm)
-                hrule(c, MARGIN, y, CONTENT_W, col=C_SILVER, lw=0.6)
-                y -= 8 * mm
-
-            # ── Answer body ───────────────────────────────────────────────────
-            _caps_left(c, task_label, MARGIN, y)
-            y -= 7 * mm
-            for line in _wrap_lines(c, answer, body_font, body_size, CONTENT_W):
-                _ensure(line_h)
-                if line:
-                    txt(c, MARGIN, y, line, size=body_size, col=C_INK)
-                y -= line_h
-
+            if not entries:
+                sep_y = draw_page_header(c, title.upper(), left_sub="ASK CLAUDE")
+                txt(c, MARGIN, sep_y - 14 * mm, "No answers yet.",
+                    size=11, italic=True, col=C_GREY)
+            else:
+                for i, entry in enumerate(entries):
+                    if i:
+                        c.showPage()
+                    _draw_answer_entry(c, entry, title)
             c.save()
         finally:
             _NAV_VALID_BMS = saved_bms
 
-    print(f"Answer PDF saved: {output_path} (task={task})")
+    print(f"Answers PDF saved: {output_path} ({len(entries)} answer(s))")
     return output_path
+
+
+def build_answer_pdf(answer: str, output_path: str, task: str = "answer",
+                     transcription: str = None, title: str = "Claude",
+                     generated_at: datetime = None) -> str:
+    """Single-answer convenience wrapper around build_answers_pdf."""
+    entry = {
+        "created_at": generated_at or datetime.now(timezone.utc),
+        "task": task, "transcription": transcription, "answer": answer,
+    }
+    return build_answers_pdf([entry], output_path, title=title)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -37,6 +37,7 @@ from database import (
     init_db, get_setting, set_setting, get_all_settings,
     get_ical_feeds, add_ical_feed, toggle_ical_feed, delete_ical_feed,
     get_uploads, clear_uploads, add_upload,
+    add_claude_answer, get_claude_answers,
 )
 from scheduler import scheduler, apply_schedule
 
@@ -527,13 +528,22 @@ async def _run_claude_ask():
     notebook = await get_setting("claude_notebook", "") or "Claude"
     folder = await get_setting("rm_folder", "/PolarisFolio")
 
+    # Prior answers feed the combined log; the new one is prepended (newest first).
+    prior = await get_claude_answers()
+
     try:
         result = await asyncio.to_thread(
             ask_about_latest_page,
-            api_key=api_key, notebook=notebook, folder=folder, pdf_dir=PDF_DIR)
+            api_key=api_key, notebook=notebook, folder=folder, pdf_dir=PDF_DIR,
+            prior_entries=prior)
     except Exception as e:
         print(f"Claude ask: error - {e}")
         return
+
+    # Persist the new answer so the next run includes it in the log.
+    entry = result["entry"]
+    await add_claude_answer(entry["created_at"], entry["task"],
+                            entry["transcription"], entry["answer"])
 
     today = date.today().isoformat()
     await add_upload(
