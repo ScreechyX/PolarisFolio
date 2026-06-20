@@ -39,7 +39,7 @@ from database import (
     get_uploads, clear_uploads, add_upload,
     add_claude_answer, get_claude_answers,
 )
-from scheduler import scheduler, apply_schedule
+from scheduler import scheduler, apply_schedule, apply_claude_watch
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -65,6 +65,7 @@ async def startup():
     await init_db()
     scheduler.start()
     await apply_schedule()
+    await apply_claude_watch()
 
 
 @app.on_event("shutdown")
@@ -475,6 +476,8 @@ async def save_settings(
     schedule_keep_days: str = Form("5"),
     anthropic_api_key: str = Form(""),
     claude_notebook: str = Form("Claude"),
+    claude_watch_enabled: str = Form("0"),
+    claude_watch_interval: str = Form("5"),
 ):
     if ms_client_id:
         await set_setting("ms_client_id", ms_client_id.strip())
@@ -508,8 +511,15 @@ async def save_settings(
     if anthropic_api_key.strip():
         await set_setting("anthropic_api_key", anthropic_api_key.strip())
     await set_setting("claude_notebook", claude_notebook.strip() or "Claude")
+    await set_setting("claude_watch_enabled", claude_watch_enabled)
+    try:
+        watch_int = max(1, int(claude_watch_interval))
+    except (TypeError, ValueError):
+        watch_int = 5
+    await set_setting("claude_watch_interval", str(watch_int))
 
     await apply_schedule()
+    await apply_claude_watch()
 
     return RedirectResponse("/settings?success=saved", status_code=303)
 
@@ -545,6 +555,10 @@ async def _run_claude_ask():
     await add_claude_answer(entry["created_at"], entry["task"],
                             entry["transcription"], entry["answer"])
 
+    # Record the answered page so the auto-watch won't re-answer it.
+    if result.get("hash"):
+        await set_setting("claude_last_page_hash", result["hash"])
+
     today = date.today().isoformat()
     await add_upload(
         display_name=result["display_name"],
@@ -556,6 +570,58 @@ async def _run_claude_ask():
         sync_action=f"claude_{result['task']}",
     )
     print(f"Claude ask: {result['display_name']} "
+          f"(task={result['task']}, uploaded={result['uploaded']})")
+
+
+async def _run_claude_watch():
+    """Auto-watch job: poll the Claude notebook and answer its latest page only
+    when it has changed since the last answer (tracked by `.rm` hash). Scheduled
+    by scheduler.apply_claude_watch; never overlaps (max_instances=1)."""
+    if (await get_setting("claude_watch_enabled", "0")) != "1":
+        return
+    api_key = await get_setting("anthropic_api_key", "")
+    if not api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        return
+    if shutil.which("rmapi") is None:
+        return
+
+    from claude_assistant import ask_about_latest_page
+
+    notebook = await get_setting("claude_notebook", "") or "Claude"
+    folder = await get_setting("rm_folder", "/PolarisFolio")
+    stored = await get_setting("claude_last_page_hash", "")
+    prior = await get_claude_answers()
+
+    try:
+        result = await asyncio.to_thread(
+            ask_about_latest_page,
+            api_key=api_key, notebook=notebook, folder=folder, pdf_dir=PDF_DIR,
+            prior_entries=prior, only_if_changed_from=stored)
+    except Exception as e:
+        print(f"Claude watch: error - {e}")
+        return
+
+    # Always record the current page fingerprint (baseline or after answering).
+    if result.get("hash"):
+        await set_setting("claude_last_page_hash", result["hash"])
+
+    if result.get("skipped"):
+        return
+
+    entry = result["entry"]
+    await add_claude_answer(entry["created_at"], entry["task"],
+                            entry["transcription"], entry["answer"])
+    today = date.today().isoformat()
+    await add_upload(
+        display_name=result["display_name"],
+        start_date=today,
+        end_date=today,
+        event_count=0,
+        pdf_path=result["pdf_path"],
+        uploaded_to_rm=result["uploaded"],
+        sync_action=f"claude_{result['task']}",
+    )
+    print(f"Claude watch: answered '{result['display_name']}' "
           f"(task={result['task']}, uploaded={result['uploaded']})")
 
 

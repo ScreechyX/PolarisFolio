@@ -181,3 +181,18 @@ def latest_page_image(archive_path: str, out_png: str) -> str:
         os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)
         _svg_to_png(svg_path, out_png)
     return out_png
+
+
+def latest_page_hash(archive_path: str) -> str:
+    """SHA-256 of the latest page's raw `.rm` bytes — a cheap fingerprint used to
+    detect when the page has changed (so the auto-watch only answers new writing,
+    not the same page every poll). Raises NotebookError if the bundle has no
+    readable page."""
+    import hashlib
+    with tempfile.TemporaryDirectory() as work:
+        root = _unpack(archive_path, work)
+        content_path = _find_content_file(root)
+        page_id = _latest_page_id(content_path)
+        rm_path = _page_rm_file(content_path, page_id)
+        with open(rm_path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
