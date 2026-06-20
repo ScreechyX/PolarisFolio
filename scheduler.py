@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from database import get_setting, add_upload
 
@@ -284,7 +285,11 @@ async def apply_schedule():
     except Exception:
         tz_name, tz = "UTC", ZoneInfo("UTC")
 
-    scheduler.remove_all_jobs()
+    # Only touch our own job — leave the Claude-watch job (and any others) alone.
+    try:
+        scheduler.remove_job("auto_generate")
+    except Exception:
+        pass
 
     if enabled == "1":
         scheduler.add_job(
@@ -297,3 +302,38 @@ async def apply_schedule():
         print(f"Scheduler: auto-generate enabled — {day} at {hour:02d}:00 {tz_name}")
     else:
         print("Scheduler: auto-generate disabled")
+
+
+async def apply_claude_watch():
+    """
+    Reads the Claude auto-watch settings and updates its interval job.
+    Call this on startup and whenever settings are saved.
+
+    The job (`_run_claude_watch`, defined in app.py) polls the Claude notebook
+    every N minutes and answers its latest page only when it has changed.
+    """
+    enabled = await get_setting("claude_watch_enabled", "0")
+    try:
+        interval = max(1, int(await get_setting("claude_watch_interval", "5")))
+    except (TypeError, ValueError):
+        interval = 5
+
+    try:
+        scheduler.remove_job("claude_watch")
+    except Exception:
+        pass
+
+    if enabled == "1":
+        from app import _run_claude_watch  # lazy: app imports scheduler at top
+        scheduler.add_job(
+            _run_claude_watch,
+            trigger=IntervalTrigger(minutes=interval),
+            id="claude_watch",
+            replace_existing=True,
+            max_instances=1,       # never overlap polls
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+        print(f"Scheduler: Claude watch enabled — every {interval} min")
+    else:
+        print("Scheduler: Claude watch disabled")

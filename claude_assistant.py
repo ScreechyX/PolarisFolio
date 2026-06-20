@@ -122,7 +122,8 @@ def ask_about_latest_page(api_key: str = None, notebook: str = "Claude",
                           folder: str = "/PolarisFolio", pdf_dir: str = None,
                           model: str = MODEL, upload: bool = True,
                           prior_entries: list = None,
-                          doc_name: str = None) -> dict:
+                          doc_name: str = None,
+                          only_if_changed_from: str = None) -> dict:
     """
     Full round trip: download `notebook`, read its latest page with Claude, then
     rebuild a single running answer log (newest first) and upload it back to
@@ -133,9 +134,17 @@ def ask_about_latest_page(api_key: str = None, notebook: str = "Claude",
     returned by database.get_claude_answers); the new answer is prepended. The
     caller is responsible for persisting the returned `entry` to the log.
 
+    `only_if_changed_from` enables the auto-watch's change detection:
+      - None  → always answer (the manual "Ask Claude now" button).
+      - ""    → no baseline yet: record the current page hash but do NOT answer,
+                so the watch only fires on *future* writing.
+      - hash  → answer only if the latest page differs from this hash.
+    When skipped, returns {"skipped": True, "hash": <current>} without an API
+    call.
+
     Returns a dict (task, transcription, answer, created_at, entry, pdf_path,
-    display_name, uploaded). Raises on hard failures (no rmapi, download failed,
-    no readable page, API error) so the caller can surface them.
+    display_name, uploaded, hash, skipped). Raises on hard failures (no rmapi,
+    download failed, no readable page, API error) so the caller can surface them.
     """
     api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -151,6 +160,13 @@ def ask_about_latest_page(api_key: str = None, notebook: str = "Claude",
             raise RuntimeError(
                 f"Could not download notebook '{notebook}' from {folder}. "
                 f"Check the notebook name and that rmapi is authenticated.")
+
+        page_hash = rm_notebook.latest_page_hash(archive)
+        # Change-detection gate for the auto-watch.
+        if only_if_changed_from is not None and (
+                only_if_changed_from == "" or page_hash == only_if_changed_from):
+            return {"skipped": True, "hash": page_hash, "task": None,
+                    "transcription": "", "answer": "", "uploaded": False}
 
         png_path = os.path.join(work, "latest_page.png")
         rm_notebook.latest_page_image(archive, png_path)
@@ -184,4 +200,6 @@ def ask_about_latest_page(api_key: str = None, notebook: str = "Claude",
         "pdf_path": pdf_path,
         "display_name": display_name,
         "uploaded": uploaded,
+        "hash": page_hash,
+        "skipped": False,
     }
