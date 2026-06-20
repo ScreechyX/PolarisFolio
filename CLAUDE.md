@@ -18,8 +18,10 @@ Self-hosted reMarkable Paper Pro planner app. Pulls calendar events from Microso
 | `graph_connector.py` | Microsoft Graph API calendar pull |
 | `ical_connector.py` | ICS feed fetch and parse |
 | `calendar_manager.py` | Combines both sources, deduplicates, groups by day |
-| `pdf_generator.py` | Monthly overview, daily, and meeting note pages with hyperlinks |
-| `rm_uploader.py` | Uploads PDF to reMarkable cloud (rmapi CLI primary, REST API fallback) |
+| `pdf_generator.py` | Monthly overview, daily, and meeting note pages with hyperlinks; `build_answer_pdf` renders a Claude reply |
+| `rm_uploader.py` | Uploads/downloads PDFs & notebooks to/from reMarkable cloud (rmapi CLI) |
+| `rm_notebook.py` | Unpacks a downloaded notebook and renders its latest `.rm` page to a PNG |
+| `claude_assistant.py` | "Ask Claude about a handwritten page": notebook → vision API → answer PDF → device |
 | `main.py` | CLI entry point |
 | `templates/` | base, dashboard, calendars, history, settings |
 | `deploy.sh` | Single-command Proxmox LXC container setup |

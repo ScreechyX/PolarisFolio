@@ -267,6 +267,53 @@
       {% endif %}
     </div>
 
+    <!-- Ask Claude (handwritten page) -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-title">Ask Claude about a handwritten page</div>
+      <div class="form-hint" style="margin-bottom: 16px;">
+        Write on a notebook (named below), then have Claude read its latest page
+        and write an answer back to the device. Start the page with a keyword to
+        pick the task: <span class="mono">answer</span>,
+        <span class="mono">summarize</span>, <span class="mono">translate</span>,
+        <span class="mono">cleanup</span>, <span class="mono">expand</span>,
+        <span class="mono">explain</span>, or <span class="mono">todo</span>
+        (default: answer).
+      </div>
+
+      <div class="grid-2" style="gap: 12px;">
+        <div class="form-group">
+          <label>Anthropic API key</label>
+          <input type="password" name="anthropic_api_key"
+            placeholder="{% if settings.get('anthropic_api_key') %}•••••••• (saved — leave blank to keep){% else %}sk-ant-...{% endif %}"
+            autocomplete="off"
+            style="font-family: var(--mono); font-size: 13px;">
+          <div class="form-hint">From console.anthropic.com. Stored locally.</div>
+        </div>
+
+        <div class="form-group">
+          <label>Notebook name</label>
+          <input type="text" name="claude_notebook"
+            value="{{ settings.get('claude_notebook', 'Claude') }}"
+            placeholder="Claude"
+            style="font-family: var(--mono); font-size: 13px;">
+          <div class="form-hint">In the device folder set above.</div>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
+        <button type="button" class="btn btn-secondary" id="askClaudeBtn" onclick="askClaudeNow()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          Ask Claude now
+        </button>
+        <span id="askClaudeStatus" style="font-size: 12.5px; color: var(--ink-3); font-family: var(--mono);"></span>
+      </div>
+      <div class="form-hint" style="margin-top: 8px;">
+        Save the API key first. The reply uploads to the device and appears in History.
+      </div>
+    </div>
+
     <div style="display: flex; gap: 10px; align-items: center;">
       <button type="submit" class="btn btn-primary">Save settings</button>
       <button type="button" class="btn btn-secondary" id="runNowBtn" onclick="runScheduleNow()">
@@ -309,6 +356,39 @@
       }
     } catch {
       btn.innerHTML = 'Run now';
+      btn.disabled = false;
+      status.textContent = 'Error — check server logs.';
+    }
+  }
+
+  async function askClaudeNow() {
+    const btn = document.getElementById('askClaudeBtn');
+    const status = document.getElementById('askClaudeStatus');
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span> Asking...';
+    status.textContent = '';
+    try {
+      const res = await fetch('/api/claude/ask', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'started') {
+        btn.innerHTML = '✓ Started';
+        status.textContent = 'Reading the latest page in the background — check History.';
+      } else if (data.error === 'no_api_key') {
+        btn.innerHTML = original;
+        btn.disabled = false;
+        status.textContent = 'Add and save your Anthropic API key first.';
+      } else if (data.error === 'no_rmapi') {
+        btn.innerHTML = original;
+        btn.disabled = false;
+        status.textContent = 'rmapi not found — connect reMarkable first.';
+      } else {
+        btn.innerHTML = original;
+        btn.disabled = false;
+        status.textContent = 'Error — check server logs.';
+      }
+    } catch {
+      btn.innerHTML = original;
       btn.disabled = false;
       status.textContent = 'Error — check server logs.';
     }

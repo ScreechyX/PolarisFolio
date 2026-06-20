@@ -2402,6 +2402,133 @@ def _build_yearly_impl(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Claude answer page ("ask Claude about a handwritten page")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Human labels for the keyword tasks Claude can switch into (see
+# claude_assistant.py). Shown as a pill in the answer page header.
+ANSWER_TASK_LABELS = {
+    "answer":    "ANSWER",
+    "summarize": "SUMMARY",
+    "translate": "TRANSLATION",
+    "cleanup":   "CLEANED UP",
+    "expand":    "EXPANDED",
+    "explain":   "EXPLANATION",
+    "todo":      "TO-DO LIST",
+}
+
+
+def _wrap_lines(c: canvas.Canvas, text: str, font: str, size: float,
+                max_w: float) -> list:
+    """Greedy word-wrap that also honours explicit newlines, returning a flat
+    list of display lines (blank string for a paragraph break)."""
+    out: list = []
+    for para in (text or "").split("\n"):
+        if not para.strip():
+            out.append("")
+            continue
+        line = ""
+        for word in para.split():
+            test = (line + " " + word).strip()
+            if c.stringWidth(test, font, size) <= max_w:
+                line = test
+            else:
+                if line:
+                    out.append(line)
+                # A single word longer than the column — hard-break it.
+                while c.stringWidth(word, font, size) > max_w and len(word) > 1:
+                    cut = len(word)
+                    while cut > 1 and c.stringWidth(word[:cut], font, size) > max_w:
+                        cut -= 1
+                    out.append(word[:cut])
+                    word = word[cut:]
+                line = word
+        out.append(line)
+    return out
+
+
+def build_answer_pdf(answer: str, output_path: str, task: str = "answer",
+                     transcription: str = None, title: str = "Claude",
+                     generated_at: datetime = None) -> str:
+    """
+    Render Claude's reply to a handwritten page as a hyperlink-free PDF, ready to
+    upload back to the device. Reuses the planner's drawing primitives
+    (draw_page_header, txt, hrule, _caps_left, _draw_pill) so it matches the
+    planner's look. Flows onto as many A4 pages as the answer needs.
+
+    `task` selects the header pill (see ANSWER_TASK_LABELS); `transcription`, if
+    given, is shown in a small "YOU WROTE" block above the answer so the page is
+    self-contained.
+    """
+    gen = generated_at or datetime.now(timezone.utc)
+    task_label = ANSWER_TASK_LABELS.get(task, ANSWER_TASK_LABELS["answer"])
+
+    # The answer page has no hyperlinks, but draw_page_header is shared with the
+    # planner; guard the nav globals so a concurrent planner build can't collide.
+    with _BUILD_LOCK:
+        global _NAV_VALID_BMS
+        saved_bms = _NAV_VALID_BMS
+        _NAV_VALID_BMS = set()
+        try:
+            c = canvas.Canvas(output_path, pagesize=A4)
+
+            def _start_page(continued: bool = False) -> float:
+                sub = gen.strftime("%a %d %b %Y · %H:%M UTC")
+                if continued:
+                    sub += "  ·  cont."
+                sep_y = draw_page_header(
+                    c, title.upper(), left_sub="ASK CLAUDE",
+                    right_label=sub)
+                # Task pill under the header rule
+                pill_cy = sep_y - 6 * mm
+                _draw_pill(c, MARGIN, pill_cy, task_label, C_ACCENT)
+                return pill_cy - 8 * mm
+
+            y = _start_page()
+            body_font = "Helvetica"
+            body_size = 10.5
+            line_h = 5.6 * mm
+            bottom = MARGIN
+
+            def _ensure(space: float):
+                nonlocal y
+                if y - space < bottom:
+                    c.showPage()
+                    y = _start_page(continued=True)
+
+            # ── Optional transcription of the handwriting ─────────────────────
+            if transcription and transcription.strip():
+                _caps_left(c, "YOU WROTE", MARGIN, y)
+                y -= 6.5 * mm
+                for line in _wrap_lines(c, transcription, "Helvetica-Oblique",
+                                        9, CONTENT_W):
+                    _ensure(line_h)
+                    if line:
+                        txt(c, MARGIN, y, line, size=9, italic=True, col=C_GREY)
+                    y -= 5 * mm
+                y -= 2 * mm
+                _ensure(8 * mm)
+                hrule(c, MARGIN, y, CONTENT_W, col=C_SILVER, lw=0.6)
+                y -= 8 * mm
+
+            # ── Answer body ───────────────────────────────────────────────────
+            _caps_left(c, task_label, MARGIN, y)
+            y -= 7 * mm
+            for line in _wrap_lines(c, answer, body_font, body_size, CONTENT_W):
+                _ensure(line_h)
+                if line:
+                    txt(c, MARGIN, y, line, size=body_size, col=C_INK)
+                y -= line_h
+
+            c.save()
+        finally:
+            _NAV_VALID_BMS = saved_bms
+
+    print(f"Answer PDF saved: {output_path} (task={task})")
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Quick self-test
 # ─────────────────────────────────────────────────────────────────────────────
 

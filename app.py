@@ -36,7 +36,7 @@ import msal
 from database import (
     init_db, get_setting, set_setting, get_all_settings,
     get_ical_feeds, add_ical_feed, toggle_ical_feed, delete_ical_feed,
-    get_uploads, clear_uploads,
+    get_uploads, clear_uploads, add_upload,
 )
 from scheduler import scheduler, apply_schedule
 
@@ -472,6 +472,8 @@ async def save_settings(
     sync_meeting_slots: str = Form("200"),
     slot_filter: str = Form("attendees"),
     schedule_keep_days: str = Form("5"),
+    anthropic_api_key: str = Form(""),
+    claude_notebook: str = Form("Claude"),
 ):
     if ms_client_id:
         await set_setting("ms_client_id", ms_client_id.strip())
@@ -500,10 +502,63 @@ async def save_settings(
     except (TypeError, ValueError):
         keep = 5
     await set_setting("schedule_keep_days", str(keep))
+    # Only overwrite the stored API key when a new value is submitted, so the
+    # masked field can be left blank to keep the existing key.
+    if anthropic_api_key.strip():
+        await set_setting("anthropic_api_key", anthropic_api_key.strip())
+    await set_setting("claude_notebook", claude_notebook.strip() or "Claude")
 
     await apply_schedule()
 
     return RedirectResponse("/settings?success=saved", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# API - ask Claude about a handwritten page
+# ---------------------------------------------------------------------------
+
+async def _run_claude_ask():
+    """Download the 'Claude' notebook's latest page, read it with Claude's
+    vision API, render the answer to a PDF, upload it back, and record it in
+    history. Runs as a background task off the request path."""
+    from claude_assistant import ask_about_latest_page
+
+    api_key = await get_setting("anthropic_api_key", "")
+    notebook = await get_setting("claude_notebook", "") or "Claude"
+    folder = await get_setting("rm_folder", "/PolarisFolio")
+
+    try:
+        result = await asyncio.to_thread(
+            ask_about_latest_page,
+            api_key=api_key, notebook=notebook, folder=folder, pdf_dir=PDF_DIR)
+    except Exception as e:
+        print(f"Claude ask: error - {e}")
+        return
+
+    today = date.today().isoformat()
+    await add_upload(
+        display_name=result["display_name"],
+        start_date=today,
+        end_date=today,
+        event_count=0,
+        pdf_path=result["pdf_path"],
+        uploaded_to_rm=result["uploaded"],
+        sync_action=f"claude_{result['task']}",
+    )
+    print(f"Claude ask: {result['display_name']} "
+          f"(task={result['task']}, uploaded={result['uploaded']})")
+
+
+@app.post("/api/claude/ask")
+async def claude_ask(background_tasks: BackgroundTasks):
+    """Trigger the 'ask Claude about a handwritten page' flow in the background."""
+    api_key = await get_setting("anthropic_api_key", "")
+    if not api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        return JSONResponse({"error": "no_api_key"}, status_code=400)
+    if shutil.which("rmapi") is None:
+        return JSONResponse({"error": "no_rmapi"}, status_code=400)
+    background_tasks.add_task(_run_claude_ask)
+    return {"status": "started"}
 
 
 # ---------------------------------------------------------------------------
