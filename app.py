@@ -476,6 +476,7 @@ async def save_settings(
     schedule_keep_days: str = Form("5"),
     anthropic_api_key: str = Form(""),
     claude_notebook: str = Form("Claude"),
+    claude_model: str = Form("claude-haiku-4-5"),
     claude_watch_enabled: str = Form("0"),
     claude_watch_interval: str = Form("5"),
 ):
@@ -511,6 +512,9 @@ async def save_settings(
     if anthropic_api_key.strip():
         await set_setting("anthropic_api_key", anthropic_api_key.strip())
     await set_setting("claude_notebook", claude_notebook.strip() or "Claude")
+    _claude_models = {"claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"}
+    await set_setting("claude_model",
+                      claude_model if claude_model in _claude_models else "claude-haiku-4-5")
     await set_setting("claude_watch_enabled", claude_watch_enabled)
     try:
         watch_int = max(1, int(claude_watch_interval))
@@ -537,6 +541,7 @@ async def _run_claude_ask():
     api_key = await get_setting("anthropic_api_key", "")
     notebook = await get_setting("claude_notebook", "") or "Claude"
     folder = await get_setting("rm_folder", "/PolarisFolio")
+    model = await get_setting("claude_model", "") or "claude-haiku-4-5"
 
     # Prior answers feed the combined log; the new one is prepended (newest first).
     prior = await get_claude_answers()
@@ -545,7 +550,7 @@ async def _run_claude_ask():
         result = await asyncio.to_thread(
             ask_about_latest_page,
             api_key=api_key, notebook=notebook, folder=folder, pdf_dir=PDF_DIR,
-            prior_entries=prior)
+            model=model, prior_entries=prior)
     except Exception as e:
         print(f"Claude ask: error - {e}")
         return
@@ -589,6 +594,7 @@ async def _run_claude_watch():
 
     notebook = await get_setting("claude_notebook", "") or "Claude"
     folder = await get_setting("rm_folder", "/PolarisFolio")
+    model = await get_setting("claude_model", "") or "claude-haiku-4-5"
     stored = await get_setting("claude_last_page_hash", "")
     prior = await get_claude_answers()
 
@@ -596,7 +602,7 @@ async def _run_claude_watch():
         result = await asyncio.to_thread(
             ask_about_latest_page,
             api_key=api_key, notebook=notebook, folder=folder, pdf_dir=PDF_DIR,
-            prior_entries=prior, only_if_changed_from=stored)
+            model=model, prior_entries=prior, only_if_changed_from=stored)
     except Exception as e:
         print(f"Claude watch: error - {e}")
         return
