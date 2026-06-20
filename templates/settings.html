@@ -300,6 +300,23 @@
         </div>
       </div>
 
+      <div class="form-group">
+        <label>Model</label>
+        {% set cmodel = settings.get('claude_model', 'claude-haiku-4-5') %}
+        <select name="claude_model" style="max-width: 320px;">
+          {% for val, label in [
+            ('claude-haiku-4-5', 'Haiku — cheapest, fastest'),
+            ('claude-sonnet-4-6', 'Sonnet — balanced'),
+            ('claude-opus-4-8', 'Opus — best handwriting accuracy, priciest')] %}
+          <option value="{{ val }}" {% if val == cmodel %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-hint">
+          Cheaper models cost far less per page; Opus reads messy handwriting best.
+          There is no free Claude tier — every read uses a small amount of credit.
+        </div>
+      </div>
+
       <div class="form-group" style="margin-top: 4px;">
         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
           <input type="checkbox" name="claude_watch_enabled" value="1"

@@ -84,15 +84,21 @@ def _image_block(png_path: str) -> dict:
     }
 
 
+def _supports_adaptive_thinking(model: str) -> bool:
+    """Adaptive thinking is available on the Opus 4.6+/Sonnet 4.6/Fable families
+    but not on Haiku or the Claude 3.x models — sending it there 400s."""
+    m = (model or "").lower()
+    return "haiku" not in m and not m.startswith("claude-3")
+
+
 def _read_handwriting(png_path: str, api_key: str, model: str = MODEL) -> dict:
     """Send the page image to Claude and return {task, transcription, answer}."""
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
-    resp = client.messages.create(
+    kwargs = dict(
         model=model,
         max_tokens=8000,
-        thinking={"type": "adaptive"},  # messy handwriting + task detection
         system=_SYSTEM_PROMPT,
         output_config={"format": {"type": "json_schema", "schema": _RESULT_SCHEMA}},
         messages=[{
@@ -100,6 +106,9 @@ def _read_handwriting(png_path: str, api_key: str, model: str = MODEL) -> dict:
             "content": [_image_block(png_path), {"type": "text", "text": _USER_TEXT}],
         }],
     )
+    if _supports_adaptive_thinking(model):
+        kwargs["thinking"] = {"type": "adaptive"}  # helps with messy handwriting
+    resp = client.messages.create(**kwargs)
     if resp.stop_reason == "refusal":
         raise RuntimeError("Claude declined to process this page.")
 
