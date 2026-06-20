@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 
 from rm_uploader import RemarkableUploader
 import rm_notebook
-from pdf_generator import build_answer_pdf
+from pdf_generator import build_answers_pdf
 
 MODEL = "claude-opus-4-8"
 
@@ -120,12 +120,20 @@ def _read_handwriting(png_path: str, api_key: str, model: str = MODEL) -> dict:
 
 def ask_about_latest_page(api_key: str = None, notebook: str = "Claude",
                           folder: str = "/PolarisFolio", pdf_dir: str = None,
-                          model: str = MODEL, upload: bool = True) -> dict:
+                          model: str = MODEL, upload: bool = True,
+                          prior_entries: list = None,
+                          doc_name: str = None) -> dict:
     """
-    Full round trip: download `notebook`, read its latest page with Claude,
-    render the reply to a PDF, and (optionally) upload that PDF back to `folder`.
+    Full round trip: download `notebook`, read its latest page with Claude, then
+    rebuild a single running answer log (newest first) and upload it back to
+    `folder` under a fixed name (default "<notebook> Answers"), replacing the
+    previous version so all answers live in one document.
 
-    Returns a dict describing the result (task, transcription, answer, pdf_path,
+    `prior_entries` is the list of previously-logged answers (newest first, as
+    returned by database.get_claude_answers); the new answer is prepended. The
+    caller is responsible for persisting the returned `entry` to the log.
+
+    Returns a dict (task, transcription, answer, created_at, entry, pdf_path,
     display_name, uploaded). Raises on hard failures (no rmapi, download failed,
     no readable page, API error) so the caller can surface them.
     """
@@ -150,19 +158,29 @@ def ask_about_latest_page(api_key: str = None, notebook: str = "Claude",
         result = _read_handwriting(png_path, api_key, model=model)
 
     gen = datetime.now(timezone.utc)
-    display_name = f"{notebook} Answer {gen:%Y-%m-%d %H%M}"
-    pdf_path = os.path.join(
-        pdf_dir, f"claude_answer_{gen:%Y%m%d_%H%M%S}.pdf")
-    build_answer_pdf(
-        result["answer"], pdf_path, task=result["task"],
-        transcription=result["transcription"], title=notebook, generated_at=gen)
+    entry = {
+        "created_at": gen.isoformat(),
+        "task": result["task"],
+        "transcription": result["transcription"],
+        "answer": result["answer"],
+    }
+
+    # Newest first: this answer, then everything already logged.
+    entries = [entry] + list(prior_entries or [])
+    display_name = doc_name or f"{notebook} Answers"
+    # One stable local file — the combined log is rebuilt and overwritten each run.
+    pdf_path = os.path.join(pdf_dir, "claude_answers.pdf")
+    build_answers_pdf(entries, pdf_path, title=notebook)
 
     uploaded = False
     if upload:
+        # force=True replaces the single answer-log document in place.
         uploaded = uploader.upload(display_name, pdf_path, folder=folder, force=True)
 
     return {
         **result,
+        "created_at": gen.isoformat(),
+        "entry": entry,
         "pdf_path": pdf_path,
         "display_name": display_name,
         "uploaded": uploaded,

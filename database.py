@@ -56,6 +56,14 @@ async def init_db():
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_meeting_slots_year_slot
                 ON meeting_slots (year, slot);
+
+            CREATE TABLE IF NOT EXISTS claude_answers (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT DEFAULT (datetime('now')),
+                task          TEXT,
+                transcription TEXT,
+                answer        TEXT
+            );
         """)
         # Migration: add sync_action to uploads tables created before it existed.
         try:
@@ -184,6 +192,34 @@ async def get_uploads(limit=20) -> list[dict]:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM uploads ORDER BY created_at DESC LIMIT ?", (limit,)
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+# -- Claude answers (running answer log) -------------------------------------
+
+async def add_claude_answer(created_at: str, task: str, transcription: str,
+                            answer: str) -> int:
+    """Append one Claude reply to the running answer log."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            """INSERT INTO claude_answers (created_at, task, transcription, answer)
+               VALUES (?, ?, ?, ?)""",
+            (created_at, task, transcription, answer),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def get_claude_answers(limit: int = 500) -> list[dict]:
+    """Return logged Claude answers, newest first (for rebuilding the combined
+    answer document)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT created_at, task, transcription, answer "
+            "FROM claude_answers ORDER BY id DESC LIMIT ?", (limit,)
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
