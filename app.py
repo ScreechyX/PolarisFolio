@@ -497,7 +497,7 @@ async def save_settings(
     await set_setting("schedule_upload", schedule_upload)
     await set_setting("sync_mode", sync_mode if sync_mode in ("rolling", "dated") else "rolling")
     try:
-        slots = max(0, min(1000, int(sync_meeting_slots)))
+        slots = max(0, min(1600, int(sync_meeting_slots)))
     except (TypeError, ValueError):
         slots = 200
     await set_setting("sync_meeting_slots", str(slots))
